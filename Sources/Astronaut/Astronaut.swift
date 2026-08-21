@@ -41,16 +41,34 @@ public final class Astronaut {
     private let defaults = UserDefaults.standard
 
     private var configuration: AstronautConfiguration?
-    private var deviceId: String
+    private let deviceUUID: UUID
     private let foregroundPresenter = ForegroundNotificationPresenter()
 
+    /// Stable per-install identifier — the `device_id` attached to every event.
+    ///
+    /// Exposed as a `UUID` because that is what StoreKit's `appAccountToken`
+    /// requires; Apple silently drops the token if it is anything else. Passing
+    /// this on a purchase is what lets verified subscription revenue be
+    /// attributed back to the user and the source that acquired them:
+    ///
+    /// ```swift
+    /// let result = try await product.purchase(options: [
+    ///     .appAccountToken(Astronaut.shared.deviceId)
+    /// ])
+    /// ```
+    public var deviceId: UUID { deviceUUID }
+
     private init() {
-        if let existing = defaults.string(forKey: "ma_device_id") {
-            deviceId = existing
+        // Ids have always been persisted as `UUID().uuidString`, so an existing
+        // install parses cleanly and keeps the id it has been reporting. Only a
+        // missing or unreadable value mints a new one.
+        if let existing = defaults.string(forKey: "ma_device_id"),
+           let parsed = UUID(uuidString: existing) {
+            deviceUUID = parsed
         } else {
-            let generated = UUID().uuidString
-            defaults.set(generated, forKey: "ma_device_id")
-            deviceId = generated
+            let generated = UUID()
+            defaults.set(generated.uuidString, forKey: "ma_device_id")
+            deviceUUID = generated
         }
     }
 
@@ -99,7 +117,7 @@ public final class Astronaut {
         guard let configuration else { return }
 
         var payload: [String: Any] = [
-            "device_id": deviceId,
+            "device_id": deviceUUID.uuidString,
             "tracking_id": configuration.trackingId,
             "traits": traits,
         ]
@@ -190,7 +208,7 @@ public final class Astronaut {
         #endif
 
         var payload: [String: Any] = [
-            "device_id": deviceId,
+            "device_id": deviceUUID.uuidString,
             "apns_token": apnsToken,
             "apns_environment": apnsEnvironment,
             "permission_status": permissionStatus,
@@ -226,7 +244,7 @@ public final class Astronaut {
 
         var payload: [String: Any] = [
             "event_type": normalizedEventType,
-            "device_id": deviceId,
+            "device_id": deviceUUID.uuidString,
             "metadata": metadata,
             "tracking_id": configuration.trackingId,
             // Occurrence time, stamped now (ms, UTC). The backend records this as
