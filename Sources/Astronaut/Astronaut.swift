@@ -13,7 +13,7 @@ public struct AstronautConfiguration {
     /// it's how the backend attributes your events to your app.
     public let trackingId: String
 
-    /// When nil, derived from the build: `debug` in DEBUG; otherwise `sandbox`
+    /// When nil, derived from the build: `sandbox` in DEBUG; otherwise `sandbox`
     /// when the App Store receipt is a sandbox receipt (TestFlight / App Review),
     /// else `release` (the live App Store). Set explicitly to override.
     public let releaseEnvironment: String?
@@ -270,15 +270,16 @@ public final class Astronaut {
         if let custom = configuration.releaseEnvironment, !custom.isEmpty {
             releaseEnvironment = custom
         } else {
+            // Two buckets, not three: "release" is real usage, "sandbox" is
+            // everything else — local builds, TestFlight, App Review. They are
+            // all non-production traffic that must stay out of your figures, and
+            // splitting them further bought nothing. It also matches what store
+            // purchases can report: Apple tells us SANDBOX or PRODUCTION and has
+            // no idea how a build was compiled, so a three-way split could never
+            // apply to revenue.
             #if DEBUG
-            releaseEnvironment = "debug"
+            releaseEnvironment = "sandbox"
             #else
-            // Non-debug builds split by App Store receipt: a *production* receipt
-            // is the live App Store ("release"); a *sandbox* receipt means the
-            // build runs against Apple's sandbox — i.e. TestFlight or an App
-            // Review install — so bucket those as "sandbox". Apple Review can't be
-            // told apart from TestFlight here (both carry a sandbox receipt), but
-            // this keeps reviewer/beta traffic out of your production numbers.
             if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
                 releaseEnvironment = "sandbox"
             } else {
