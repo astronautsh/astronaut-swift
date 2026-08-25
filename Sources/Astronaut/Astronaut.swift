@@ -105,6 +105,28 @@ public final class Astronaut {
         )
     }
 
+    /// Reports that a free trial started. Call it when the trial begins, not
+    /// when it converts — the conversion is a purchase.
+    ///
+    /// The event name is fixed here rather than left to each app, so the
+    /// dashboard's trials metric works without per-app configuration. Carries
+    /// no revenue: a trial is free, and sending 0 would make it indistinguishable
+    /// from a zero-value purchase.
+    ///
+    /// Apps with a verified revenue connection can ignore this — trials are
+    /// derived from the store's own record there, which also catches trials
+    /// that lapse without ever reaching your code.
+    public func trackTrialStart(
+        productId: String? = nil,
+        metadata: [String: String] = [:]
+    ) {
+        var payload = metadata
+        if let productId, !productId.isEmpty {
+            payload["product_id"] = productId
+        }
+        send(eventType: "trial_started", metadata: payload)
+    }
+
     /// Associates a real end-user identity with this device so the dashboard can
     /// show a name/email on the user journey instead of an anonymous handle.
     /// Call it once you know who the user is (e.g. after sign-in). The latest
