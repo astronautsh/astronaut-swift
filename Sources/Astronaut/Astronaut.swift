@@ -116,13 +116,31 @@ public final class Astronaut {
     /// Apps with a verified revenue connection can ignore this — trials are
     /// derived from the store's own record there, which also catches trials
     /// that lapse without ever reaching your code.
+    ///
+    /// - Parameters:
+    ///   - price: What the customer will be charged if the trial converts.
+    ///     Reported as potential revenue, never as revenue — nothing has been
+    ///     collected yet, and most trials never convert. Pass the product's
+    ///     price, not 0.
+    ///   - currency: ISO 4217 code for `price`.
     public func trackTrialStart(
         productId: String? = nil,
+        price: Double? = nil,
+        currency: String? = nil,
         metadata: [String: String] = [:]
     ) {
         var payload = metadata
         if let productId, !productId.isEmpty {
             payload["product_id"] = productId
+        }
+        // Deliberately metadata rather than the revenue field: revenue is money
+        // that changed hands, and every total built on it stays truthful only
+        // if a trial contributes nothing.
+        if let price {
+            payload["potential_price"] = String(price)
+        }
+        if let currency, !currency.isEmpty {
+            payload["potential_currency"] = currency.uppercased()
         }
         send(eventType: "trial_started", metadata: payload)
     }
