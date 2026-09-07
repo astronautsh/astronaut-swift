@@ -34,6 +34,32 @@ public final class Astronaut {
         return f
     }()
 
+    /// Hardware identifier, e.g. "iPhone16,2" — the raw utsname value, not a
+    /// marketing name. Mapping identifiers to "iPhone 15 Pro Max" needs a table
+    /// that is wrong for every device released after the SDK shipped, so the
+    /// dashboard receives the accurate opaque string and decides for itself.
+    ///
+    /// Computed once: uname(3) is a syscall, and every event would repeat it.
+    private static let deviceModel: String = {
+        // On a simulator, uname reports the Mac's own architecture ("arm64"),
+        // which would land in the data as if it were a real device. The
+        // simulator advertises the device it is pretending to be here instead.
+        if let simulated = ProcessInfo.processInfo
+            .environment["SIMULATOR_MODEL_IDENTIFIER"], !simulated.isEmpty {
+            return simulated
+        }
+
+        var systemInfo = utsname()
+        uname(&systemInfo)
+
+        // `machine` is a fixed-size C char array bridged as a tuple: read it as
+        // raw bytes and stop at the first NUL, or the string carries the array's
+        // trailing padding.
+        return withUnsafeBytes(of: systemInfo.machine) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+        }
+    }()
+
     private let clickIdKey = "ma_click_id"
     private let sourceKey = "ma_source"
     /// Bumped when first-open semantics changed; avoids a stale `true` from older builds.
@@ -304,6 +330,10 @@ public final class Astronaut {
         if let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
            !appVersion.isEmpty {
             payload["app_version"] = appVersion
+        }
+
+        if !Self.deviceModel.isEmpty {
+            payload["device_model"] = Self.deviceModel
         }
 
         let releaseEnvironment: String
