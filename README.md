@@ -59,6 +59,10 @@ come from. Present it anywhere:
 }
 ```
 
+The conversation is owned by a secret the SDK generates and keeps in the
+Keychain, sent as a bearer token on every request — a device id is never
+accepted as proof of ownership. Nothing to configure.
+
 `Astronaut.shared.support.unreadCount` drives a badge, and
 `Astronaut.shared.refreshSupport()` at launch keeps it current. Replies arrive
 as push notifications under your own app's name; tapping one opens the chat.

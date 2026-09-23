@@ -156,6 +156,47 @@ final class SupportChatTests: XCTestCase {
         XCTAssertEqual(chat.messages.map(\.body), ["Hi", "Hi"])
     }
 
+    /// Every request proves it owns the conversation. Without this the server
+    /// is back to trusting a device id, which is not a secret.
+    func testRequestsCarryTheInstallSecret() async throws {
+        StubURLProtocol.respond(status: 200, body: "{}")
+        let chat = SupportChat()
+
+        chat.send("is anyone there?")
+
+        try await waitUntil { StubURLProtocol.lastAuthorization != nil }
+        let header = try XCTUnwrap(StubURLProtocol.lastAuthorization)
+        let secret = header.replacingOccurrences(of: "Bearer ", with: "")
+        XCTAssertTrue(header.hasPrefix("Bearer "))
+        XCTAssertEqual(secret.count, 43, "32 random bytes, base64url, unpadded")
+        XCTAssertNil(
+            secret.rangeOfCharacter(from: CharacterSet(charactersIn: "+/=")),
+            "the secret must survive a header untouched"
+        )
+    }
+
+    /// The same install keeps the same secret, or it would lose its history on
+    /// every launch — and a refresh must not name the device in the URL, where
+    /// it would end up in logs.
+    func testSecretIsStableAndDeviceIdIsNotInTheQuery() async throws {
+        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
+        let first = SupportChat()
+        first.refresh()
+        try await waitUntil { StubURLProtocol.lastAuthorization != nil }
+        let firstSecret = try XCTUnwrap(StubURLProtocol.lastAuthorization)
+        let url = try XCTUnwrap(StubURLProtocol.lastURL)
+
+        XCTAssertFalse(
+            url.absoluteString.contains("device_id"),
+            "a refresh is authenticated by the secret, not by naming the device"
+        )
+
+        let second = SupportChat()
+        second.refresh()
+        try await waitUntil { StubURLProtocol.requestCount >= 2 }
+        XCTAssertEqual(StubURLProtocol.lastAuthorization, firstSecret)
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(
@@ -194,6 +235,20 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var shouldFail = false
     nonisolated(unsafe) private static var count = 0
     nonisolated(unsafe) private static var clientId: String?
+    nonisolated(unsafe) private static var authorization: String?
+    nonisolated(unsafe) private static var url: URL?
+
+    /// The Authorization header of the last request, so the tests can check
+    /// that the install actually authenticates itself.
+    static var lastAuthorization: String? {
+        lock.lock(); defer { lock.unlock() }
+        return authorization
+    }
+
+    static var lastURL: URL? {
+        lock.lock(); defer { lock.unlock() }
+        return url
+    }
 
     /// The client_id of the last message sent, so a refresh can be answered
     /// with the row the server would have stored for it.
@@ -226,6 +281,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         shouldFail = false
         count = 0
         clientId = nil
+        authorization = nil
+        url = nil
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -250,6 +307,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
         Self.lock.lock()
         Self.count += 1
+        Self.authorization = request.value(forHTTPHeaderField: "Authorization")
+        Self.url = request.url
         if let bodyData,
            let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
            let sent = json["client_id"] as? String {

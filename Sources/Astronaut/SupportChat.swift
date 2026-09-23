@@ -180,10 +180,9 @@ public final class SupportChat: ObservableObject {
             url: AstronautConfiguration.baseURL.appendingPathComponent("/api/support/messages"),
             resolvingAgainstBaseURL: false
         )
-        var items = [
-            URLQueryItem(name: "tracking_id", value: context.trackingId),
-            URLQueryItem(name: "device_id", value: context.deviceId),
-        ]
+        // No device_id: the secret says which conversation this is, and an
+        // identifier in a query string is one that ends up in a log.
+        var items = [URLQueryItem(name: "tracking_id", value: context.trackingId)]
         if let since = lastLoadedAt {
             items.append(URLQueryItem(name: "since", value: Self.iso8601.string(from: since)))
         }
@@ -193,6 +192,9 @@ public final class SupportChat: ObservableObject {
             return
         }
 
+        var pull = URLRequest(url: url)
+        pull.setValue("Bearer \(context.secret)", forHTTPHeaderField: "Authorization")
+
         Task { [weak self] in
             defer {
                 Task { @MainActor in
@@ -200,7 +202,7 @@ public final class SupportChat: ObservableObject {
                     self?.isRefreshing = false
                 }
             }
-            guard let (data, response) = try? await self?.session.data(from: url),
+            guard let (data, response) = try? await self?.session.data(for: pull),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { return }
@@ -232,7 +234,8 @@ public final class SupportChat: ObservableObject {
         unreadCount = 0
         post(
             path: "/api/support/read",
-            payload: ["tracking_id": context.trackingId, "device_id": context.deviceId]
+            payload: ["tracking_id": context.trackingId],
+            secret: context.secret
         )
     }
 
@@ -261,6 +264,7 @@ public final class SupportChat: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(context.secret)", forHTTPHeaderField: "Authorization")
         request.httpBody = data
 
         Task { [weak self] in
@@ -311,7 +315,7 @@ public final class SupportChat: ObservableObject {
         }
     }
 
-    private func post(path: String, payload: [String: Any]) {
+    private func post(path: String, payload: [String: Any], secret: String) {
         guard
             let url = URL(string: path, relativeTo: AstronautConfiguration.baseURL),
             let data = try? JSONSerialization.data(withJSONObject: payload)
@@ -319,6 +323,7 @@ public final class SupportChat: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         request.httpBody = data
         session.dataTask(with: request).resume()
     }
@@ -377,9 +382,15 @@ public final class SupportChat: ObservableObject {
 
     // MARK: - Helpers
 
-    private static func context() -> (trackingId: String, deviceId: String)? {
-        guard let trackingId = Astronaut.shared.currentTrackingId else { return nil }
-        return (trackingId, Astronaut.shared.deviceId.uuidString)
+    /// What every request needs: which app, which install, and the secret that
+    /// owns the conversation. No secret, no chat — the routes refuse an
+    /// unauthenticated caller, and so should we before making the trip.
+    private static func context() -> (trackingId: String, deviceId: String, secret: String)? {
+        guard
+            let trackingId = Astronaut.shared.currentTrackingId,
+            let secret = SupportSecretStore.secret(for: trackingId)
+        else { return nil }
+        return (trackingId, Astronaut.shared.deviceId.uuidString, secret)
     }
 
     private static let iso8601: ISO8601DateFormatter = {
