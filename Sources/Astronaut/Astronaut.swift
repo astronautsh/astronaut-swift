@@ -1,5 +1,8 @@
 import Foundation
 import UserNotifications
+#if canImport(SwiftUI)
+import SwiftUI
+#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -60,8 +63,6 @@ public final class Astronaut {
         }
     }()
 
-    private let clickIdKey = "ma_click_id"
-    private let sourceKey = "ma_source"
     /// Bumped when first-open semantics changed; avoids a stale `true` from older builds.
     private let hasSentFirstAppOpenKey = "ma_has_sent_first_app_open"
     private let defaults = UserDefaults.standard
@@ -83,6 +84,42 @@ public final class Astronaut {
     /// ])
     /// ```
     public var deviceId: UUID { deviceUUID }
+
+    /// The configured app, for other parts of the SDK. Internal: callers
+    /// already know their own tracking id, and nothing outside needs it.
+    var currentTrackingId: String? { configuration?.trackingId }
+
+    /// This install's support conversation — messages, unread count, and the
+    /// retry queue that makes a question survive a dropped network.
+    ///
+    /// Badge your own Help button with `unreadCount`, and present
+    /// `supportView()` when it is tapped.
+    @MainActor
+    public private(set) lazy var support = SupportChat()
+
+    /// Replies the user has not read yet. Call `refreshSupport()` on launch to
+    /// bring it up to date before anyone opens the chat.
+    @MainActor
+    public var unreadSupportCount: Int { support.unreadCount }
+
+    /// Check for new replies. Safe to call on launch and when the app comes
+    /// forward; the chat screen keeps itself up to date on its own.
+    @MainActor
+    public func refreshSupport() {
+        support.refresh()
+    }
+
+    #if canImport(SwiftUI)
+    /// The drop-in support screen, tinted to match the app.
+    @available(iOS 16.0, *)
+    @MainActor
+    public func supportView(
+        tint: SwiftUI.Color = .accentColor,
+        placeholder: String = "Ask us anything…"
+    ) -> some SwiftUI.View {
+        SupportChatView(chat: support, tint: tint, placeholder: placeholder)
+    }
+    #endif
 
     private init() {
         // Ids have always been persisted as `UUID().uuidString`, so an existing
@@ -358,14 +395,6 @@ public final class Astronaut {
             #endif
         }
         payload["release_environment"] = releaseEnvironment
-
-        if let clickId = defaults.string(forKey: clickIdKey), !clickId.isEmpty {
-            payload["click_id"] = clickId
-        }
-
-        if let source = defaults.string(forKey: sourceKey), !source.isEmpty {
-            payload["source"] = source
-        }
 
         if let revenue {
             payload["revenue"] = revenue

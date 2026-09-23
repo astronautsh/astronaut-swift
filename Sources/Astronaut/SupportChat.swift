@@ -1,0 +1,346 @@
+import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// One message in a support conversation.
+public struct SupportMessage: Identifiable, Equatable, Sendable {
+    public enum Sender: String, Sendable {
+        /// The person using the app.
+        case user
+        /// Whoever answers from the dashboard, shown as the app itself.
+        case owner
+    }
+
+    /// Where a message is in its life. Only outgoing messages are ever
+    /// anything but `.sent`: the user needs to see that their question is on
+    /// its way, and to know when it did not make it.
+    public enum State: String, Sendable {
+        case sending
+        case sent
+        case failed
+    }
+
+    public let id: String
+    public let sender: Sender
+    public let body: String
+    public let sentAt: Date
+    public internal(set) var state: State
+}
+
+/// A message written on this device that has not been accepted by the server
+/// yet. Persisted, because the reason a send fails is usually that the app is
+/// about to be closed or the network just went.
+private struct QueuedMessage: Codable {
+    let clientId: String
+    let body: String
+    let createdAt: Date
+}
+
+/// The support conversation for this install.
+///
+/// Analytics events are fire-and-forget: one lost to a flaky network is a
+/// rounding error nobody notices. A support message is not — someone asking
+/// about a refund and hearing nothing is worse than never offering chat. So
+/// every outgoing message is written to disk first and retried until the
+/// server takes it.
+@MainActor
+public final class SupportChat: ObservableObject {
+    /// The conversation, oldest first, including messages still on their way.
+    @Published public private(set) var messages: [SupportMessage] = []
+    /// Replies the user has not seen. Badge your own Help button with this.
+    @Published public private(set) var unreadCount: Int = 0
+    /// True while the first load is in flight, so the view can say so.
+    @Published public private(set) var isLoading: Bool = false
+
+    private var queue: [QueuedMessage] = []
+    private var isFlushing = false
+    private var lastLoadedAt: Date?
+    private let session = URLSession.shared
+
+    private let queueURL: URL? = {
+        guard
+            let dir = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first
+        else { return nil }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("astronaut-support-queue.json")
+    }()
+
+    init() {
+        loadQueue()
+        // Anything left from a previous run is shown as still sending, so a
+        // message never silently disappears between launches.
+        messages = queue.map {
+            SupportMessage(
+                id: $0.clientId,
+                sender: .user,
+                body: $0.body,
+                sentAt: $0.createdAt,
+                state: .sending
+            )
+        }
+
+        // Anything still queued from a previous run goes out now. Waiting for
+        // the app to be backgrounded and reopened would strand a message
+        // written just before a crash — the case the queue exists for.
+        flush()
+
+        #if canImport(UIKit)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Coming back to the app is the moment a reply is most likely
+            // waiting, and the moment the network is most likely back.
+            MainActor.assumeIsolated {
+                self?.refresh()
+                self?.flush()
+            }
+        }
+        #endif
+    }
+
+    // MARK: - Public API
+
+    /// Send a message from the user. Appears immediately as `.sending`, and
+    /// keeps retrying until it lands.
+    public func send(_ text: String) {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+
+        let queued = QueuedMessage(
+            clientId: UUID().uuidString,
+            body: String(body.prefix(2000)),
+            createdAt: Date()
+        )
+        queue.append(queued)
+        saveQueue()
+        messages.append(
+            SupportMessage(
+                id: queued.clientId,
+                sender: .user,
+                body: queued.body,
+                sentAt: queued.createdAt,
+                state: .sending
+            )
+        )
+        flush()
+    }
+
+    /// Re-attempt a message the user was told had failed.
+    public func retry(_ message: SupportMessage) {
+        guard message.state == .failed else { return }
+        markState(of: message.id, to: .sending)
+        flush()
+    }
+
+    /// Pull the thread from the server. Cheap to call often — it asks only for
+    /// what is newer than what it already has.
+    public func refresh() {
+        guard let context = Self.context() else { return }
+        if messages.isEmpty { isLoading = true }
+
+        var components = URLComponents(
+            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/support/messages"),
+            resolvingAgainstBaseURL: false
+        )
+        var items = [
+            URLQueryItem(name: "tracking_id", value: context.trackingId),
+            URLQueryItem(name: "device_id", value: context.deviceId),
+        ]
+        if let since = lastLoadedAt {
+            items.append(URLQueryItem(name: "since", value: Self.iso8601.string(from: since)))
+        }
+        components?.queryItems = items
+        guard let url = components?.url else { return }
+
+        Task { [weak self] in
+            defer { Task { @MainActor in self?.isLoading = false } }
+            guard let (data, response) = try? await self?.session.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
+
+            let incoming = (payload["messages"] as? [[String: Any]] ?? [])
+                .compactMap(Self.parse)
+            let unread = payload["unread"] as? Int ?? 0
+            await MainActor.run { self?.merge(incoming, unread: unread) }
+        }
+    }
+
+    /// The user has seen the conversation. Clears their badge on the server so
+    /// it does not follow them to another launch.
+    public func markRead() {
+        guard unreadCount > 0, let context = Self.context() else { return }
+        unreadCount = 0
+        post(
+            path: "/api/support/read",
+            payload: ["tracking_id": context.trackingId, "device_id": context.deviceId]
+        )
+    }
+
+    // MARK: - Sending
+
+    /// Sends the oldest queued message, then the next. One at a time, so the
+    /// conversation keeps the order it was written in.
+    private func flush() {
+        guard !isFlushing, let next = queue.first, let context = Self.context() else { return }
+        isFlushing = true
+
+        let body: [String: Any] = [
+            "tracking_id": context.trackingId,
+            "device_id": context.deviceId,
+            "body": next.body,
+            "client_id": next.clientId,
+        ]
+        guard
+            let url = URL(string: "/api/support/messages", relativeTo: AstronautConfiguration.baseURL),
+            let data = try? JSONSerialization.data(withJSONObject: body)
+        else {
+            isFlushing = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+
+        Task { [weak self] in
+            let status: Int
+            if let (_, response) = try? await self?.session.data(for: request) {
+                status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            } else {
+                status = 0
+            }
+
+            await MainActor.run {
+                guard let self else { return }
+                self.isFlushing = false
+
+                if status == 200 {
+                    // Accepted — including a retry the server recognised as a
+                    // duplicate, which it answers with the message it already
+                    // stored rather than an error.
+                    self.queue.removeAll { $0.clientId == next.clientId }
+                    self.saveQueue()
+                    self.markState(of: next.clientId, to: .sent)
+                    self.flush()
+                } else if (400..<500).contains(status) && status != 429 {
+                    // The server will never accept this one — too long, or an
+                    // app that no longer exists. Retrying forever would hide
+                    // the problem from the person waiting for an answer.
+                    self.queue.removeAll { $0.clientId == next.clientId }
+                    self.saveQueue()
+                    self.markState(of: next.clientId, to: .failed)
+                } else {
+                    // Network, rate limit, or the server having a moment: keep
+                    // it queued and try again when the app next comes forward.
+                    self.markState(of: next.clientId, to: .sending)
+                }
+            }
+        }
+    }
+
+    private func post(path: String, payload: [String: Any]) {
+        guard
+            let url = URL(string: path, relativeTo: AstronautConfiguration.baseURL),
+            let data = try? JSONSerialization.data(withJSONObject: payload)
+        else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+        session.dataTask(with: request).resume()
+    }
+
+    // MARK: - State
+
+    private func merge(_ incoming: [SupportMessage], unread: Int) {
+        guard !incoming.isEmpty || unreadCount != unread else { return }
+        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+
+        for message in incoming {
+            byId[message.id] = message
+        }
+        // A message that has come back from the server is no longer pending,
+        // however it was identified locally.
+        let serverBodies = Set(incoming.filter { $0.sender == .user }.map(\.body))
+        for (id, message) in byId where message.state != .sent {
+            if serverBodies.contains(message.body) && !queue.contains(where: { $0.clientId == id }) {
+                byId.removeValue(forKey: id)
+            }
+        }
+
+        messages = byId.values.sorted { $0.sentAt < $1.sentAt }
+        unreadCount = unread
+        lastLoadedAt = incoming.map(\.sentAt).max() ?? lastLoadedAt
+    }
+
+    private func markState(of id: String, to state: SupportMessage.State) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].state = state
+    }
+
+    // MARK: - Disk
+
+    private func loadQueue() {
+        guard let url = queueURL, let data = try? Data(contentsOf: url) else { return }
+        queue = (try? JSONDecoder().decode([QueuedMessage].self, from: data)) ?? []
+    }
+
+    private func saveQueue() {
+        guard let url = queueURL else { return }
+        if queue.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(queue) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - Helpers
+
+    private static func context() -> (trackingId: String, deviceId: String)? {
+        guard let trackingId = Astronaut.shared.currentTrackingId else { return nil }
+        return (trackingId, Astronaut.shared.deviceId.uuidString)
+    }
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static func parse(_ row: [String: Any]) -> SupportMessage? {
+        guard
+            let id = row["id"] as? String,
+            let senderRaw = row["sender"] as? String,
+            let sender = SupportMessage.Sender(rawValue: senderRaw),
+            let body = row["body"] as? String,
+            let sentAtRaw = row["sent_at"] as? String
+        else { return nil }
+
+        // Postgres hands back microseconds and a "+00:00" offset; the plain
+        // formatter rejects the fractional part, so try both before giving up
+        // on a message that is otherwise perfectly readable.
+        let sentAt = iso8601.date(from: sentAtRaw)
+            ?? ISO8601DateFormatter().date(from: sentAtRaw)
+            ?? Self.postgres.date(from: sentAtRaw)
+            ?? Date()
+
+        return SupportMessage(id: id, sender: sender, body: body, sentAt: sentAt, state: .sent)
+    }
+
+    private static let postgres: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX"
+        return f
+    }()
+}
