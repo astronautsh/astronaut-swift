@@ -21,19 +21,23 @@ public struct SupportChatView: View {
 
     private let tint: Color
     private let placeholder: String
+    private let responder: SupportResponder?
 
     public init(
         chat: SupportChat,
         tint: Color = .accentColor,
-        placeholder: String = "Ask us anything…"
+        placeholder: String = "Ask us anything…",
+        responder: SupportResponder? = nil
     ) {
         self.chat = chat
         self.tint = tint
         self.placeholder = placeholder
+        self.responder = responder
     }
 
     public var body: some View {
         VStack(spacing: 0) {
+            responderHeader
             conversation
             Divider()
             composer
@@ -53,6 +57,33 @@ public struct SupportChatView: View {
         .onChange(of: chat.unreadCount) { unread in
             // A reply that lands while the screen is open has been seen.
             if unread > 0 { chat.markRead() }
+        }
+    }
+
+    @ViewBuilder
+    private var responderHeader: some View {
+        if let responder {
+            HStack(spacing: 10) {
+                Text(responder.initials)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(tint, in: Circle())
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(responder.name)
+                        .font(.system(size: 15, weight: .semibold))
+                    if let role = responder.role {
+                        Text(role)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
         }
     }
 
@@ -78,7 +109,7 @@ public struct SupportChatView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Questions come straight to us")
+            Text(responder.map { "Questions come straight to \($0.name)" } ?? "Questions come straight to us")
                 .font(.headline)
             Text("Write below and we'll reply here. You'll get a notification when we do.")
                 .font(.subheadline)

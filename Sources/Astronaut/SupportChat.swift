@@ -3,6 +3,30 @@ import Foundation
 import UIKit
 #endif
 
+/// Who the user is talking to.
+///
+/// A name and a role, because "Message us" tells someone nothing about whether
+/// a human is on the other end. For a small app the honest answer is usually a
+/// person — and being told so is most of why anyone writes in at all.
+public struct SupportResponder: Sendable, Equatable {
+    public let name: String
+    public let role: String?
+
+    /// - Parameters:
+    ///   - name: Who replies, e.g. "Sahil".
+    ///   - role: What they are to the app, e.g. "Founder". Omitted for none.
+    public init(name: String, role: String? = nil) {
+        self.name = name
+        self.role = role
+    }
+
+    /// Initials for the avatar, at most two letters.
+    var initials: String {
+        let parts = name.split(separator: " ").prefix(2)
+        return parts.compactMap { $0.first }.map(String.init).joined().uppercased()
+    }
+}
+
 /// One message in a support conversation.
 public struct SupportMessage: Identifiable, Equatable, Sendable {
     public enum Sender: String, Sendable {
