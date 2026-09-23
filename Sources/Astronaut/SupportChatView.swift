@@ -43,9 +43,11 @@ public struct SupportChatView: View {
             composer
         }
         .onAppear {
+            chat.screenAppeared()
             chat.refresh()
             chat.markRead()
         }
+        .onDisappear { chat.screenDisappeared() }
         // Polling, not a socket: support is not a chat room, and a few seconds
         // of latency costs nothing next to a connection held open per screen.
         .task {

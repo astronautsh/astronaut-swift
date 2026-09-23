@@ -84,6 +84,10 @@ public final class SupportChat: ObservableObject {
     private var queue: [QueuedMessage] = []
     private var isFlushing = false
     private var isRefreshing = false
+
+    /// True while the conversation is on screen. A reply that lands now needs
+    /// no banner: the person is already reading the thread it would announce.
+    public private(set) var isOnScreen = false
     private var lastLoadedAt: Date?
     private let session = URLSession.shared
 
@@ -212,6 +216,24 @@ public final class SupportChat: ObservableObject {
             let unread = payload["unread"] as? Int ?? 0
             await MainActor.run { self?.merge(incoming, unread: unread) }
         }
+    }
+
+    /// The conversation appeared or went away. Drives whether an incoming
+    /// reply is announced, so it is the view's business to keep it honest —
+    /// `SupportChatView` does this for you.
+    public func screenAppeared() {
+        isOnScreen = true
+    }
+
+    public func screenDisappeared() {
+        isOnScreen = false
+    }
+
+    /// A reply arrived while the app was in the foreground. Pulls it in at
+    /// once rather than waiting up to a poll interval, so a message the user
+    /// was just told about is already there when they look.
+    func replyArrivedInForeground() {
+        refresh()
     }
 
     /// A reply notification was tapped. Asks the app to show the chat, and

@@ -448,7 +448,22 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .list, .sound, .badge])
+        guard Self.isSupportReply(notification.request.content.userInfo) else {
+            completionHandler([.banner, .list, .sound, .badge])
+            return
+        }
+
+        Task { @MainActor in
+            let chat = Astronaut.shared.support
+            // Pull the reply in now, so it is on screen by the time the
+            // notification would have told them about it.
+            chat.replyArrivedInForeground()
+
+            // Nobody needs to be told about a message they are looking at.
+            // Still delivered, so the unread count and the thread stay right —
+            // only the banner and the sound are dropped.
+            completionHandler(chat.isOnScreen ? [] : [.banner, .list, .sound, .badge])
+        }
     }
 
     func userNotificationCenter(

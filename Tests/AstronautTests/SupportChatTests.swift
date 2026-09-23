@@ -197,6 +197,20 @@ final class SupportChatTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.lastAuthorization, firstSecret)
     }
 
+    /// A reply that lands while the conversation is open is not announced —
+    /// the presenter asks this, so it has to survive the screen coming and
+    /// going rather than latching on first appearance.
+    func testScreenVisibilityDrivesNotificationSuppression() async throws {
+        let chat = SupportChat()
+        XCTAssertFalse(chat.isOnScreen, "a chat nobody opened announces replies")
+
+        chat.screenAppeared()
+        XCTAssertTrue(chat.isOnScreen)
+
+        chat.screenDisappeared()
+        XCTAssertFalse(chat.isOnScreen, "a closed screen must let banners through again")
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(

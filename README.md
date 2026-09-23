@@ -59,6 +59,11 @@ come from. Present it anywhere:
 }
 ```
 
+A reply that arrives while the conversation is open is not announced — it
+simply appears. If you build your own chat UI instead of `supportView`, call
+`Astronaut.shared.support.screenAppeared()` / `.screenDisappeared()` to get the
+same behaviour.
+
 The conversation is owned by a secret the SDK generates and keeps in the
 Keychain, sent as a bearer token on every request — a device id is never
 accepted as proof of ownership. Nothing to configure.
