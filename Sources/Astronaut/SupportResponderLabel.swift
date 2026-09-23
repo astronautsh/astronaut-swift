@@ -8,11 +8,15 @@ import SwiftUI
 ///
 /// ```swift
 /// .toolbar {
-///     ToolbarItem(placement: .topBarLeading) {
+///     ToolbarItem(placement: .principal) {
 ///         SupportResponderLabel(responder: responder, tint: .orange)
 ///     }
 /// }
 /// ```
+///
+/// Use `.principal`. iOS 26 wraps a custom `.topBarLeading` item in a glass
+/// capsule sized like a button and drops everything after the first view, so
+/// the avatar survives and the name and role disappear without any warning.
 @available(iOS 16.0, *)
 public struct SupportResponderLabel: View {
     private let responder: SupportResponder
