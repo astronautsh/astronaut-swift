@@ -329,6 +329,69 @@ final class SupportChatTests: XCTestCase {
         )
     }
 
+    /// A conversation longer than a page opens on the newest one and can walk
+    /// backwards — the older page goes in front of what is already held, in
+    /// time order.
+    func testOlderMessagesArePrependedInOrder() async throws {
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"""
+            {"messages":[
+              {"id":"m3","sender":"user","body":"third","client_id":null,"sent_at":"2026-09-20T12:00:00.000000+00:00","read_at":null}
+            ],"unread":0,"has_more":true}
+            """#
+        )
+        let chat = SupportChat()
+        chat.refresh()
+        try await waitUntil { chat.messages.count == 1 }
+        XCTAssertTrue(chat.hasMoreHistory, "a full page means something sits above it")
+
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"""
+            {"messages":[
+              {"id":"m1","sender":"user","body":"first","client_id":null,"sent_at":"2026-09-20T10:00:00.000000+00:00","read_at":null},
+              {"id":"m2","sender":"owner","body":"second","client_id":null,"sent_at":"2026-09-20T11:00:00.000000+00:00","read_at":null}
+            ],"has_more":false}
+            """#
+        )
+        chat.loadOlderMessages()
+
+        try await waitUntil { chat.messages.count == 3 }
+        XCTAssertEqual(chat.messages.map(\.body), ["first", "second", "third"])
+        XCTAssertFalse(chat.hasMoreHistory, "the start of the conversation stops the asking")
+    }
+
+    /// Reaching the start is remembered: the newest page cannot report it, and
+    /// a poll saying "there is more above me" must not undo it.
+    func testReachingTheStartSurvivesAPoll() async throws {
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"{"messages":[{"id":"m2","sender":"user","body":"second","client_id":null,"sent_at":"2026-09-20T11:00:00.000000+00:00","read_at":null}],"unread":0,"has_more":true}"#
+        )
+        let chat = SupportChat()
+        chat.refresh()
+        try await waitUntil { chat.hasMoreHistory }
+
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"{"messages":[{"id":"m1","sender":"user","body":"first","client_id":null,"sent_at":"2026-09-20T10:00:00.000000+00:00","read_at":null}],"has_more":false}"#
+        )
+        chat.loadOlderMessages()
+        try await waitUntil { chat.messages.count == 2 && !chat.hasMoreHistory }
+
+        // A later poll of the newest page still reports more above itself.
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"{"messages":[],"unread":0,"has_more":true}"#
+        )
+        try await waitUntil {
+            chat.refresh()
+            return StubURLProtocol.requestCount >= 3
+        }
+        XCTAssertFalse(chat.hasMoreHistory, "history already walked to its start stays walked")
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(

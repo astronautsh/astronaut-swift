@@ -18,6 +18,14 @@ public struct SupportChatView: View {
     @ObservedObject private var chat: SupportChat
     @State private var draft: String = ""
     @FocusState private var inputFocused: Bool
+    /// Whether the last message is on screen. Only then does an arriving one
+    /// scroll into view — being dragged to the bottom while reading back
+    /// through a conversation is worse than missing a message by a second.
+    @State private var isAtBottom = true
+    /// The message to hold still after a page of older ones is prepended,
+    /// so the content the reader was looking at does not jump away.
+    @State private var anchorAfterPrepend: String?
+    @State private var hasSettledOnOpen = false
 
     private let tint: Color
     private let placeholder: String
@@ -105,6 +113,17 @@ public struct SupportChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    if chat.hasMoreHistory {
+                        // Asking as it comes into view is the whole gesture:
+                        // reaching the top of a conversation is what "show me
+                        // more" means here.
+                        Text(chat.isLoadingHistory ? "Loading earlier messages…" : " ")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .onAppear { chat.loadOlderMessages() }
+                    }
+
                     // A conversation that exists but has not arrived yet is
                     // not an empty one: saying "ask us anything" to someone
                     // who was just sent a message is simply wrong.
@@ -120,12 +139,40 @@ public struct SupportChatView: View {
                     ForEach(chat.messages) { message in
                         bubble(for: message).id(message.id)
                     }
+
+                    // Sentinel: on screen exactly when the conversation is
+                    // scrolled to its end, which is cheaper and steadier than
+                    // measuring offsets.
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
                 .padding(16)
             }
             .onChange(of: chat.messages.count) { _ in
+                // Older messages arriving: keep the reader where they were,
+                // rather than letting the taller list shift under them.
+                if let anchor = anchorAfterPrepend {
+                    proxy.scrollTo(anchor, anchor: .top)
+                    anchorAfterPrepend = nil
+                    return
+                }
+
                 guard let last = chat.messages.last else { return }
+                // The first fill of an open conversation lands at the newest
+                // message without animating there from the top.
+                guard hasSettledOnOpen else {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                    hasSettledOnOpen = true
+                    return
+                }
+                guard isAtBottom else { return }
                 withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
+            .onChange(of: chat.isLoadingHistory) { loading in
+                // Note where to hold before the older page lands.
+                if loading { anchorAfterPrepend = chat.messages.first?.id }
             }
         }
     }

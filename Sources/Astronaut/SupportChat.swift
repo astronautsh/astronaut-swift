@@ -113,6 +113,13 @@ public final class SupportChat: ObservableObject {
     @Published public private(set) var responderName: String?
     @Published public private(set) var responderRole: String?
 
+    /// Whether anything sits above the oldest message held here.
+    @Published public private(set) var hasMoreHistory = false
+    /// True while a page of older messages is on its way.
+    @Published public private(set) var isLoadingHistory = false
+
+    private var reachedStartOfHistory = false
+
     private var queue: [QueuedMessage] = []
     private var isFlushing = false
     private var isRefreshing = false
@@ -249,9 +256,15 @@ public final class SupportChat: ObservableObject {
             let responder = payload["responder"] as? [String: Any]
             let name = responder?["name"] as? String
             let role = responder?["role"] as? String
+            // Only the newest page reports this; a catch-up fetch says nothing
+            // about what sits above what is already held.
+            let hasMore = payload["has_more"] as? Bool
 
             await MainActor.run {
                 self?.merge(incoming, unread: unread)
+                if let hasMore, self?.reachedStartOfHistory == false {
+                    self?.hasMoreHistory = hasMore
+                }
                 // Only ever replaced by something: a server that has no name
                 // set should not blank out the app's own fallback.
                 if let name, !name.isEmpty { self?.responderName = name }
@@ -282,7 +295,69 @@ public final class SupportChat: ObservableObject {
         // Nothing local can belong to the new conversation.
         messages.removeAll()
         lastLoadedAt = nil
+        hasMoreHistory = false
+        reachedStartOfHistory = false
         refresh()
+    }
+
+    /// Pulls the page before the oldest message on screen.
+    ///
+    /// Called when the reader reaches the top of the conversation. Quiet about
+    /// failure: a page that does not arrive can be asked for again by
+    /// scrolling, and an error banner over someone's history helps nobody.
+    public func loadOlderMessages() {
+        guard hasMoreHistory, !isLoadingHistory,
+              let oldest = messages.first,
+              let context = Self.context()
+        else { return }
+
+        isLoadingHistory = true
+
+        var components = URLComponents(
+            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/support/messages"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "tracking_id", value: context.trackingId),
+            URLQueryItem(name: "before", value: Self.iso8601.string(from: oldest.sentAt)),
+        ]
+        guard let url = components?.url else {
+            isLoadingHistory = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(context.secret)", forHTTPHeaderField: "Authorization")
+
+        Task { [weak self] in
+            defer { Task { @MainActor in self?.isLoadingHistory = false } }
+
+            guard let (data, response) = try? await self?.session.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
+
+            let older = (payload["messages"] as? [[String: Any]] ?? []).compactMap(Self.parse)
+            let hasMore = payload["has_more"] as? Bool ?? false
+
+            await MainActor.run {
+                guard let self else { return }
+                self.prepend(older.map(\.message))
+                self.hasMoreHistory = hasMore
+                // The newest page cannot tell us this, so remember it.
+                if !hasMore { self.reachedStartOfHistory = true }
+            }
+        }
+    }
+
+    /// Older messages, in front of what is already held.
+    private func prepend(_ older: [SupportMessage]) {
+        guard !older.isEmpty else { return }
+        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        for message in older where byId[message.id] == nil {
+            byId[message.id] = message
+        }
+        messages = byId.values.sorted { $0.sentAt < $1.sentAt }
     }
 
     /// The responder to show, given what the app supplied as a fallback.
