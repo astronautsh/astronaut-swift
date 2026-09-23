@@ -9,15 +9,41 @@ import UIKit
 /// a human is on the other end. For a small app the honest answer is usually a
 /// person — and being told so is most of why anyone writes in at all.
 public struct SupportResponder: Sendable, Equatable {
+    /// What to show beside the name.
+    public enum Avatar: Sendable, Equatable {
+        /// The responder's initials on a tinted circle.
+        case initials
+        /// A drawn face — friendlier than two letters, and no asset to ship.
+        case cartoon
+    }
+
     public let name: String
     public let role: String?
+    public let avatar: Avatar
+    /// Shows a green dot on the avatar.
+    ///
+    /// The SDK cannot know whether anyone is actually at a keyboard, so this
+    /// is the app's claim, not an observation. Set it when it is true —
+    /// during your working hours, say — rather than leaving it on forever,
+    /// because a permanent green dot beside an unanswered message is worse
+    /// than no dot at all.
+    public let isOnline: Bool
 
     /// - Parameters:
     ///   - name: Who replies, e.g. "Sahil".
     ///   - role: What they are to the app, e.g. "Founder". Omitted for none.
-    public init(name: String, role: String? = nil) {
+    ///   - avatar: Initials by default; `.cartoon` draws a face.
+    ///   - isOnline: Whether to show the green dot. Off by default.
+    public init(
+        name: String,
+        role: String? = nil,
+        avatar: Avatar = .initials,
+        isOnline: Bool = false
+    ) {
         self.name = name
         self.role = role
+        self.avatar = avatar
+        self.isOnline = isOnline
     }
 
     /// Initials for the avatar, at most two letters.

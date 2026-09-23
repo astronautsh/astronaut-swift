@@ -116,13 +116,15 @@ public final class Astronaut {
     public func supportView(
         tint: SwiftUI.Color = .accentColor,
         placeholder: String = "Ask us anything…",
-        responder: SupportResponder? = nil
+        responder: SupportResponder? = nil,
+        showsResponderHeader: Bool = true
     ) -> some SwiftUI.View {
         SupportChatView(
             chat: support,
             tint: tint,
             placeholder: placeholder,
-            responder: responder
+            responder: responder,
+            showsResponderHeader: showsResponderHeader
         )
     }
     #endif

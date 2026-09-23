@@ -22,17 +22,24 @@ public struct SupportChatView: View {
     private let tint: Color
     private let placeholder: String
     private let responder: SupportResponder?
+    private let showsResponderHeader: Bool
 
+    /// - Parameter showsResponderHeader: Draws the name and role above the
+    ///   conversation. Turn it off when the host puts a
+    ///   ``SupportResponderLabel`` in its navigation bar instead, so the
+    ///   identity appears once rather than twice.
     public init(
         chat: SupportChat,
         tint: Color = .accentColor,
         placeholder: String = "Ask us anything…",
-        responder: SupportResponder? = nil
+        responder: SupportResponder? = nil,
+        showsResponderHeader: Bool = true
     ) {
         self.chat = chat
         self.tint = tint
         self.placeholder = placeholder
         self.responder = responder
+        self.showsResponderHeader = showsResponderHeader
     }
 
     public var body: some View {
@@ -64,23 +71,9 @@ public struct SupportChatView: View {
 
     @ViewBuilder
     private var responderHeader: some View {
-        if let responder {
+        if let responder, showsResponderHeader {
             HStack(spacing: 10) {
-                Text(responder.initials)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(tint, in: Circle())
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(responder.name)
-                        .font(.system(size: 15, weight: .semibold))
-                    if let role = responder.role {
-                        Text(role)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                SupportResponderLabel(responder: responder, tint: tint, size: 36)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -113,7 +106,11 @@ public struct SupportChatView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(responder.map { "Questions come straight to \($0.name)" } ?? "Questions come straight to us")
                 .font(.headline)
-            Text("Write below and we'll reply here. You'll get a notification when we do.")
+            Text(
+                responder.map {
+                    "Write below and \($0.name) will reply here. You'll get a notification then."
+                } ?? "Write below and we'll reply here. You'll get a notification when we do."
+            )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
