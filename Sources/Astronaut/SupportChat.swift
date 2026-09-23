@@ -107,6 +107,12 @@ public final class SupportChat: ObservableObject {
     /// rather than pushes a screen into someone else's hierarchy.
     @Published public private(set) var shouldPresent: Bool = false
 
+    /// Who answers, as the dashboard has it. Served with the conversation so
+    /// the app does not hardcode a name the owner can change — and so changing
+    /// it does not need a release.
+    @Published public private(set) var responderName: String?
+    @Published public private(set) var responderRole: String?
+
     private var queue: [QueuedMessage] = []
     private var isFlushing = false
     private var isRefreshing = false
@@ -240,7 +246,17 @@ public final class SupportChat: ObservableObject {
             let incoming = (payload["messages"] as? [[String: Any]] ?? [])
                 .compactMap(Self.parse)
             let unread = payload["unread"] as? Int ?? 0
-            await MainActor.run { self?.merge(incoming, unread: unread) }
+            let responder = payload["responder"] as? [String: Any]
+            let name = responder?["name"] as? String
+            let role = responder?["role"] as? String
+
+            await MainActor.run {
+                self?.merge(incoming, unread: unread)
+                // Only ever replaced by something: a server that has no name
+                // set should not blank out the app's own fallback.
+                if let name, !name.isEmpty { self?.responderName = name }
+                if let role, !role.isEmpty { self?.responderRole = role }
+            }
         }
     }
 
@@ -267,6 +283,22 @@ public final class SupportChat: ObservableObject {
         messages.removeAll()
         lastLoadedAt = nil
         refresh()
+    }
+
+    /// The responder to show, given what the app supplied as a fallback.
+    ///
+    /// The dashboard owns the name and role; the app owns how it looks. An
+    /// app that passes nothing gets the dashboard's identity with a plain
+    /// avatar, and one that passes a responder keeps its avatar and online
+    /// dot while the name follows the dashboard.
+    public func resolvedResponder(fallback: SupportResponder?) -> SupportResponder? {
+        guard let name = responderName ?? fallback?.name else { return nil }
+        return SupportResponder(
+            name: name,
+            role: responderRole ?? fallback?.role,
+            avatar: fallback?.avatar ?? .initials,
+            isOnline: fallback?.isOnline ?? false
+        )
     }
 
     /// A support notification arrived — tapped, or shown while the app was

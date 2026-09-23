@@ -288,6 +288,47 @@ final class SupportChatTests: XCTestCase {
         XCTAssertEqual(chat.messages.count, 1, "the notification copy and the stored one are one message")
     }
 
+    /// The dashboard owns who answers; the app only supplies a fallback and
+    /// how it looks. Two places to change a name is one too many.
+    func testResponderNameFollowsTheServer() async throws {
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"{"messages":[],"unread":0,"responder":{"name":"Sahil","role":"Founder"}}"#
+        )
+        let chat = SupportChat()
+        let fallback = SupportResponder(name: "Support", avatar: .cartoon, isOnline: true)
+
+        XCTAssertEqual(
+            chat.resolvedResponder(fallback: fallback)?.name,
+            "Support",
+            "before the fetch, the app's own fallback stands"
+        )
+
+        chat.refresh()
+
+        try await waitUntil { chat.responderName == "Sahil" }
+        let resolved = try XCTUnwrap(chat.resolvedResponder(fallback: fallback))
+        XCTAssertEqual(resolved.name, "Sahil")
+        XCTAssertEqual(resolved.role, "Founder")
+        XCTAssertEqual(resolved.avatar, .cartoon, "how it looks stays the app's business")
+        XCTAssertTrue(resolved.isOnline)
+    }
+
+    /// An app that has named nobody must not blank out the name the app
+    /// shipped with.
+    func testEmptyServerResponderKeepsTheFallback() async throws {
+        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0,"responder":null}"#)
+        let chat = SupportChat()
+        chat.refresh()
+
+        try await waitUntil { StubURLProtocol.requestCount >= 1 }
+        XCTAssertNil(chat.responderName)
+        XCTAssertEqual(
+            chat.resolvedResponder(fallback: SupportResponder(name: "Support"))?.name,
+            "Support"
+        )
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(

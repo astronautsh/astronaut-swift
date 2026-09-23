@@ -83,9 +83,14 @@ public struct SupportChatView: View {
         }
     }
 
+    /// What the app passed, with the dashboard's name and role preferred.
+    private var effectiveResponder: SupportResponder? {
+        chat.resolvedResponder(fallback: responder)
+    }
+
     @ViewBuilder
     private var responderHeader: some View {
-        if let responder, showsResponderHeader {
+        if let responder = effectiveResponder, showsResponderHeader {
             HStack(spacing: 10) {
                 SupportResponderLabel(responder: responder, tint: tint, size: 36)
                 Spacer(minLength: 0)
@@ -127,10 +132,13 @@ public struct SupportChatView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(responder.map { "Questions come straight to \($0.name)" } ?? "Questions come straight to us")
+            Text(
+                effectiveResponder.map { "Questions come straight to \($0.name)" }
+                    ?? "Questions come straight to us"
+            )
                 .font(.headline)
             Text(
-                responder.map {
+                effectiveResponder.map {
                     "Write below and \($0.name) will reply here. You'll get a notification then."
                 } ?? "Write below and we'll reply here. You'll get a notification when we do."
             )
