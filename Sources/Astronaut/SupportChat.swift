@@ -269,10 +269,32 @@ public final class SupportChat: ObservableObject {
         refresh()
     }
 
-    /// A reply arrived while the app was in the foreground. Pulls it in at
-    /// once rather than waiting up to a poll interval, so a message the user
-    /// was just told about is already there when they look.
-    func replyArrivedInForeground() {
+    /// A support notification arrived — tapped, or shown while the app was
+    /// open.
+    ///
+    /// The notification already carries the message, so it goes on screen
+    /// immediately under the id the server stored it as. Waiting for the fetch
+    /// instead left an empty conversation for as long as the network took,
+    /// which on a cold launch is seconds of looking at nothing.
+    func notificationArrived(sessionKey: String?, messageId: String?, body: String?) {
+        if let sessionKey { adoptSession(sessionKey) }
+
+        if let messageId, let body,
+           !messages.contains(where: { $0.id == messageId }) {
+            messages.append(
+                SupportMessage(
+                    id: messageId,
+                    sender: .owner,
+                    body: body,
+                    // The real timestamp comes with the fetch; until then, now
+                    // is close enough and keeps it last in the conversation.
+                    sentAt: Date(),
+                    state: .sent
+                )
+            )
+            unreadCount += 1
+        }
+
         refresh()
     }
 

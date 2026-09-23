@@ -250,6 +250,44 @@ final class SupportChatTests: XCTestCase {
         try await waitUntil { chat.messages.isEmpty }
     }
 
+    /// The message is in the notification, so it should be on screen before
+    /// any fetch returns — and the fetch must then recognise it rather than
+    /// showing it twice.
+    func testNotificationShowsItsMessageBeforeTheFetchLands() async throws {
+        StubURLProtocol.failWithNetworkError()
+        let chat = SupportChat()
+
+        chat.notificationArrived(
+            sessionKey: nil,
+            messageId: "server-99",
+            body: "we pushed a fix, try again"
+        )
+
+        XCTAssertEqual(chat.messages.count, 1, "the pushed message must not wait for the network")
+        XCTAssertEqual(chat.messages.first?.body, "we pushed a fix, try again")
+        XCTAssertEqual(chat.messages.first?.sender, .owner)
+
+        // The same message, as the server stores it.
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"{"messages":[{"id":"server-99","sender":"owner","body":"we pushed a fix, try again","client_id":null,"sent_at":"2026-09-20T10:00:00.000000+00:00","read_at":null}],"unread":1}"#
+        )
+        // Polled the way the open screen polls: a refresh already in flight
+        // makes the next one a no-op, which is the SDK behaving correctly.
+        // Polled the way the open screen polls: a refresh already in flight
+        // makes the next one a no-op, which is the SDK behaving correctly.
+        // The stored copy carries the server's timestamp, so seeing that
+        // timestamp is what proves the two were reconciled rather than both
+        // kept.
+        let stored = ISO8601DateFormatter().date(from: "2026-09-20T10:00:00Z")!
+        try await waitUntil {
+            chat.refresh()
+            guard let sentAt = chat.messages.first?.sentAt else { return false }
+            return abs(sentAt.timeIntervalSince(stored)) < 1
+        }
+        XCTAssertEqual(chat.messages.count, 1, "the notification copy and the stored one are one message")
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(

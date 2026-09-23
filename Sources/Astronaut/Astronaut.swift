@@ -460,10 +460,12 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
 
         Task { @MainActor in
             let chat = Astronaut.shared.support
-            if let key = Self.sessionKey(userInfo) { chat.adoptSession(key) }
-            // Pull the reply in now, so it is on screen by the time the
-            // notification would have told them about it.
-            chat.replyArrivedInForeground()
+            // On screen by the time the notification would have mentioned it.
+            chat.notificationArrived(
+                sessionKey: Self.sessionKey(userInfo),
+                messageId: Self.messageId(userInfo),
+                body: notification.request.content.body
+            )
 
             // Nobody needs to be told about a message they are looking at.
             // Still delivered, so the unread count and the thread stay right —
@@ -482,10 +484,14 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
         guard Self.isSupportReply(userInfo) else { return }
 
         Task { @MainActor in
-            // A conversation opened from the dashboard arrives with its key.
-            if let key = Self.sessionKey(userInfo) {
-                Astronaut.shared.support.adoptSession(key)
-            }
+            // The message is in the notification, so the conversation opens
+            // with it rather than empty while a fetch runs — which on a cold
+            // launch is the difference between a blank screen and a chat.
+            Astronaut.shared.support.notificationArrived(
+                sessionKey: Self.sessionKey(userInfo),
+                messageId: Self.messageId(userInfo),
+                body: response.notification.request.content.body
+            )
             // The app decides how to show it — this only says that it should.
             Astronaut.shared.support.notificationTapped()
         }
@@ -496,6 +502,16 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
     private static func isSupportReply(_ userInfo: [AnyHashable: Any]) -> Bool {
         guard let astronaut = userInfo["astronaut"] as? [String: Any] else { return false }
         return astronaut["type"] as? String == "support"
+    }
+
+    /// The id the message was stored under, so the copy taken from the
+    /// notification is recognised as the same one when the fetch lands.
+    private static func messageId(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let astronaut = userInfo["astronaut"] as? [String: Any],
+              let id = astronaut["message_id"] as? String,
+              !id.isEmpty
+        else { return nil }
+        return id
     }
 
     /// The key to a conversation the owner started, when this notification is

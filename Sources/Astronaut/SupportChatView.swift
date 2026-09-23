@@ -100,8 +100,17 @@ public struct SupportChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    // A conversation that exists but has not arrived yet is
+                    // not an empty one: saying "ask us anything" to someone
+                    // who was just sent a message is simply wrong.
                     if chat.messages.isEmpty {
-                        emptyState
+                        if chat.isLoading {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 24)
+                        } else {
+                            emptyState
+                        }
                     }
                     ForEach(chat.messages) { message in
                         bubble(for: message).id(message.id)
