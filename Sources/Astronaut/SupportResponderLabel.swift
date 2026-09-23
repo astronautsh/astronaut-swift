@@ -8,15 +8,25 @@ import SwiftUI
 ///
 /// ```swift
 /// .toolbar {
-///     ToolbarItem(placement: .principal) {
-///         SupportResponderLabel(responder: responder, tint: .orange)
+///     if #available(iOS 26.0, *) {
+///         ToolbarItem(placement: .topBarLeading) {
+///             SupportResponderLabel(responder: responder, tint: .orange)
+///                 .fixedSize()
+///         }
+///         .sharedBackgroundVisibility(.hidden)
+///     } else {
+///         ToolbarItem(placement: .topBarLeading) {
+///             SupportResponderLabel(responder: responder, tint: .orange)
+///         }
 ///     }
 /// }
 /// ```
 ///
-/// Use `.principal`. iOS 26 wraps a custom `.topBarLeading` item in a glass
-/// capsule sized like a button and drops everything after the first view, so
-/// the avatar survives and the name and role disappear without any warning.
+/// The `sharedBackgroundVisibility` call is not decoration. iOS 26 puts a
+/// custom leading item inside a shared glass capsule sized like a button,
+/// which clips everything after its first view: the avatar draws and the name
+/// and role disappear, with no warning and nothing in the console. Opting that
+/// item out of the shared background is what makes the label render.
 @available(iOS 16.0, *)
 public struct SupportResponderLabel: View {
     private let responder: SupportResponder
