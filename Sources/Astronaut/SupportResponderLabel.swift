@@ -69,11 +69,13 @@ public struct SupportAvatarView: View {
 
             if responder.isOnline {
                 Circle()
-                    .fill(Color.green)
+                    .fill(Color(red: 0.20, green: 0.78, blue: 0.35))
                     // Ringed in the background colour so the dot reads as a
-                    // badge on the avatar rather than a blob overlapping it.
-                    .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: size * 0.07))
-                    .frame(width: size * 0.3, height: size * 0.3)
+                    // badge on the avatar rather than a blob overlapping it,
+                    // and tucked inside the circle rather than hanging off it.
+                    .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: size * 0.055))
+                    .frame(width: size * 0.26, height: size * 0.26)
+                    .offset(x: -size * 0.01, y: -size * 0.01)
                     .accessibilityLabel("Online")
             }
         }
@@ -112,60 +114,65 @@ private struct CartoonFace: View {
             ZStack {
                 Circle().fill(tint.opacity(0.22))
 
-                // Hair: a disc behind the head, trimmed by the head itself.
+                // Hair: a disc behind the head, showing as a crown above it.
                 Circle()
-                    .fill(Color(red: 0.24, green: 0.18, blue: 0.15))
+                    .fill(hair)
                     .frame(width: side * 0.66, height: side * 0.66)
-                    .offset(y: -side * 0.16)
+                    .offset(y: -side * 0.10)
 
-                // Head.
+                // Head, kept large: at 30pt the face has to survive being
+                // three millimetres wide.
                 Circle()
-                    .fill(Color(red: 0.97, green: 0.80, blue: 0.66))
-                    .frame(width: side * 0.58, height: side * 0.58)
-                    .offset(y: side * 0.02)
+                    .fill(Color(red: 0.97, green: 0.81, blue: 0.68))
+                    .frame(width: side * 0.60, height: side * 0.60)
+                    .offset(y: side * 0.01)
 
-                // Fringe, sitting on the forehead.
+                // Fringe — only the top of the forehead, so it never reaches
+                // the eyes and turn them into dark-on-dark.
                 Circle()
-                    .fill(Color(red: 0.24, green: 0.18, blue: 0.15))
-                    .frame(width: side * 0.58, height: side * 0.58)
-                    .offset(y: -side * 0.20)
+                    .fill(hair)
+                    .frame(width: side * 0.60, height: side * 0.60)
+                    .offset(y: -side * 0.28)
                     .mask(
                         Circle()
-                            .frame(width: side * 0.58, height: side * 0.58)
-                            .offset(y: side * 0.02)
+                            .frame(width: side * 0.60, height: side * 0.60)
+                            .offset(y: side * 0.01)
                     )
 
-                // Eyes.
-                HStack(spacing: side * 0.14) {
+                // Eyes, low enough to sit on skin.
+                HStack(spacing: side * 0.15) {
                     eye(side: side)
                     eye(side: side)
                 }
-                .offset(y: side * 0.02)
+                .offset(y: side * 0.04)
 
-                // Smile: the lower quarter of a circle's outline.
+                // Smile: the lower arc of a circle's outline.
                 Circle()
                     .trim(from: 0.08, to: 0.42)
                     .stroke(
                         Color(red: 0.42, green: 0.26, blue: 0.20),
-                        style: StrokeStyle(lineWidth: side * 0.045, lineCap: .round)
+                        style: StrokeStyle(lineWidth: side * 0.042, lineCap: .round)
                     )
-                    .frame(width: side * 0.26, height: side * 0.26)
-                    .offset(y: side * 0.13)
+                    .frame(width: side * 0.24, height: side * 0.24)
+                    .offset(y: side * 0.16)
 
-                // Shoulders, so the head is not floating.
+                // Shoulders, so the head is not floating — a sliver at the
+                // bottom of the circle, not a slab across the chin.
                 Capsule()
                     .fill(tint)
-                    .frame(width: side * 0.78, height: side * 0.34)
-                    .offset(y: side * 0.46)
+                    .frame(width: side * 0.92, height: side * 0.30)
+                    .offset(y: side * 0.54)
             }
             .frame(width: side, height: side)
         }
     }
 
+    private var hair: Color { Color(red: 0.26, green: 0.19, blue: 0.16) }
+
     private func eye(side: CGFloat) -> some View {
         Circle()
             .fill(Color(red: 0.20, green: 0.16, blue: 0.14))
-            .frame(width: side * 0.075, height: side * 0.085)
+            .frame(width: side * 0.072, height: side * 0.082)
     }
 }
 #endif
