@@ -140,7 +140,13 @@ public final class Astronaut {
         // Installed here, not only when permission is requested: a tap on a
         // reply launches the app cold, and the delegate has to be in place
         // before iOS delivers that tap.
-        UNUserNotificationCenter.current().delegate = foregroundPresenter
+        //
+        // Guarded because UNUserNotificationCenter asserts when there is no app
+        // bundle around it — which is exactly the case inside a unit-test
+        // process, where there are no notifications to deliver anyway.
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            UNUserNotificationCenter.current().delegate = foregroundPresenter
+        }
     }
 
     public func trackAppOpen() {
