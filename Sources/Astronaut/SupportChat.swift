@@ -55,6 +55,7 @@ public final class SupportChat: ObservableObject {
 
     private var queue: [QueuedMessage] = []
     private var isFlushing = false
+    private var isRefreshing = false
     private var lastLoadedAt: Date?
     private let session = URLSession.shared
 
@@ -141,7 +142,10 @@ public final class SupportChat: ObservableObject {
     /// Pull the thread from the server. Cheap to call often — it asks only for
     /// what is newer than what it already has.
     public func refresh() {
-        guard let context = Self.context() else { return }
+        // Launch calls this, and so does coming to the foreground — which on a
+        // cold start is the same moment. One request is enough.
+        guard !isRefreshing, let context = Self.context() else { return }
+        isRefreshing = true
         if messages.isEmpty { isLoading = true }
 
         var components = URLComponents(
@@ -156,10 +160,18 @@ public final class SupportChat: ObservableObject {
             items.append(URLQueryItem(name: "since", value: Self.iso8601.string(from: since)))
         }
         components?.queryItems = items
-        guard let url = components?.url else { return }
+        guard let url = components?.url else {
+            isRefreshing = false
+            return
+        }
 
         Task { [weak self] in
-            defer { Task { @MainActor in self?.isLoading = false } }
+            defer {
+                Task { @MainActor in
+                    self?.isLoading = false
+                    self?.isRefreshing = false
+                }
+            }
             guard let (data, response) = try? await self?.session.data(from: url),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
