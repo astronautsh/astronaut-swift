@@ -224,8 +224,13 @@ public final class SupportChat: ObservableObject {
 
         Task { [weak self] in
             let status: Int
-            if let (_, response) = try? await self?.session.data(for: request) {
+            var storedMessage: SupportMessage?
+            if let (data, response) = try? await self?.session.data(for: request) {
                 status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let row = payload["message"] as? [String: Any] {
+                    storedMessage = Self.parse(row)?.message
+                }
             } else {
                 status = 0
             }
@@ -240,7 +245,14 @@ public final class SupportChat: ObservableObject {
                     // stored rather than an error.
                     self.queue.removeAll { $0.clientId == next.clientId }
                     self.saveQueue()
-                    self.markState(of: next.clientId, to: .sent)
+                    // Take the server's id for this message. Keeping the local
+                    // client id would leave the same message under two ids, and
+                    // the next refresh would show it twice.
+                    if let stored = storedMessage {
+                        self.adopt(stored, replacing: next.clientId)
+                    } else {
+                        self.markState(of: next.clientId, to: .sent)
+                    }
                     self.flush()
                 } else if (400..<500).contains(status) && status != 429 {
                     // The server will never accept this one — too long, or an
@@ -272,25 +284,32 @@ public final class SupportChat: ObservableObject {
 
     // MARK: - State
 
-    private func merge(_ incoming: [SupportMessage], unread: Int) {
+    private func merge(_ incoming: [(message: SupportMessage, clientId: String?)], unread: Int) {
         guard !incoming.isEmpty || unreadCount != unread else { return }
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
 
-        for message in incoming {
-            byId[message.id] = message
-        }
-        // A message that has come back from the server is no longer pending,
-        // however it was identified locally.
-        let serverBodies = Set(incoming.filter { $0.sender == .user }.map(\.body))
-        for (id, message) in byId where message.state != .sent {
-            if serverBodies.contains(message.body) && !queue.contains(where: { $0.clientId == id }) {
-                byId.removeValue(forKey: id)
+        for item in incoming {
+            byId[item.message.id] = item.message
+            // The same message, still filed locally under the id this device
+            // gave it. Matched on client_id rather than on the text, so two
+            // messages that happen to say "Hi" stay two messages.
+            if let clientId = item.clientId {
+                byId.removeValue(forKey: clientId)
             }
         }
 
         messages = byId.values.sorted { $0.sentAt < $1.sentAt }
         unreadCount = unread
-        lastLoadedAt = incoming.map(\.sentAt).max() ?? lastLoadedAt
+        lastLoadedAt = incoming.map(\.message.sentAt).max() ?? lastLoadedAt
+    }
+
+    /// Replaces a locally-keyed message with the one the server stored.
+    private func adopt(_ stored: SupportMessage, replacing clientId: String) {
+        if let index = messages.firstIndex(where: { $0.id == clientId }) {
+            messages[index] = stored
+        } else if !messages.contains(where: { $0.id == stored.id }) {
+            messages.append(stored)
+        }
     }
 
     private func markState(of id: String, to state: SupportMessage.State) {
@@ -328,7 +347,9 @@ public final class SupportChat: ObservableObject {
         return f
     }()
 
-    private static func parse(_ row: [String: Any]) -> SupportMessage? {
+    private static func parse(
+        _ row: [String: Any]
+    ) -> (message: SupportMessage, clientId: String?)? {
         guard
             let id = row["id"] as? String,
             let senderRaw = row["sender"] as? String,
@@ -345,7 +366,10 @@ public final class SupportChat: ObservableObject {
             ?? Self.postgres.date(from: sentAtRaw)
             ?? Date()
 
-        return SupportMessage(id: id, sender: sender, body: body, sentAt: sentAt, state: .sent)
+        return (
+            SupportMessage(id: id, sender: sender, body: body, sentAt: sentAt, state: .sent),
+            row["client_id"] as? String
+        )
     }
 
     private static let postgres: DateFormatter = {

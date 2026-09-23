@@ -118,6 +118,44 @@ final class SupportChatTests: XCTestCase {
         )
     }
 
+    /// The bug found on a real phone: one "Hi" typed, two shown. The message
+    /// was filed under the id this device made up, the server's copy came back
+    /// under its own id, and nothing tied the two together.
+    func testSentMessageIsNotDuplicatedByARefresh() async throws {
+        // A response the SDK cannot learn the stored id from, so the local copy
+        // keeps its client id — the case the merge has to survive.
+        StubURLProtocol.respond(status: 200, body: "{}")
+        let chat = SupportChat()
+
+        chat.send("Hi")
+        try await waitUntil { chat.messages.first?.state == .sent }
+        let clientId = try XCTUnwrap(StubURLProtocol.lastClientId)
+
+        let row = "{\"id\":\"server-1\",\"sender\":\"user\",\"body\":\"Hi\",\"client_id\":\""
+            + clientId
+            + "\",\"sent_at\":\"2026-09-23T10:00:00.000000+00:00\",\"read_at\":null}"
+        StubURLProtocol.respond(status: 200, body: "{\"messages\":[" + row + "],\"unread\":0}")
+        chat.refresh()
+
+        try await waitUntil { chat.messages.first?.id == "server-1" }
+        XCTAssertEqual(chat.messages.count, 1, "the same message must not appear twice")
+        XCTAssertEqual(chat.messages.map(\.body), ["Hi"])
+    }
+
+    /// The other half: two messages that genuinely say the same thing are two
+    /// messages, so matching on the text would be wrong.
+    func testRepeatedTextStaysTwoMessages() async throws {
+        StubURLProtocol.respond(status: 200, body: "{}")
+        let chat = SupportChat()
+
+        chat.send("Hi")
+        try await waitUntil { chat.messages.count == 1 }
+        chat.send("Hi")
+
+        try await waitUntil { chat.messages.count == 2 }
+        XCTAssertEqual(chat.messages.map(\.body), ["Hi", "Hi"])
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(
@@ -155,6 +193,14 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var body = "{}"
     nonisolated(unsafe) private static var shouldFail = false
     nonisolated(unsafe) private static var count = 0
+    nonisolated(unsafe) private static var clientId: String?
+
+    /// The client_id of the last message sent, so a refresh can be answered
+    /// with the row the server would have stored for it.
+    static var lastClientId: String? {
+        lock.lock(); defer { lock.unlock() }
+        return clientId
+    }
 
     static var requestCount: Int {
         lock.lock(); defer { lock.unlock() }
@@ -179,14 +225,36 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         body = "{}"
         shouldFail = false
         count = 0
+        clientId = nil
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        // URLSession moves a request body into a stream, so httpBody is nil by
+        // the time a protocol sees it.
+        var bodyData = request.httpBody
+        if bodyData == nil, let stream = request.httpBodyStream {
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            var collected = Data()
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                collected.append(contentsOf: buffer[0..<read])
+            }
+            stream.close()
+            bodyData = collected
+        }
+
         Self.lock.lock()
         Self.count += 1
+        if let bodyData,
+           let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+           let sent = json["client_id"] as? String {
+            Self.clientId = sent
+        }
         let failing = Self.shouldFail
         let status = Self.status
         let body = Self.body
