@@ -452,13 +452,15 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        guard Self.isSupportReply(notification.request.content.userInfo) else {
+        let userInfo = notification.request.content.userInfo
+        guard Self.isSupportReply(userInfo) else {
             completionHandler([.banner, .list, .sound, .badge])
             return
         }
 
         Task { @MainActor in
             let chat = Astronaut.shared.support
+            if let key = Self.sessionKey(userInfo) { chat.adoptSession(key) }
             // Pull the reply in now, so it is on screen by the time the
             // notification would have told them about it.
             chat.replyArrivedInForeground()
@@ -476,9 +478,14 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         defer { completionHandler() }
-        guard Self.isSupportReply(response.notification.request.content.userInfo) else { return }
+        let userInfo = response.notification.request.content.userInfo
+        guard Self.isSupportReply(userInfo) else { return }
 
         Task { @MainActor in
+            // A conversation opened from the dashboard arrives with its key.
+            if let key = Self.sessionKey(userInfo) {
+                Astronaut.shared.support.adoptSession(key)
+            }
             // The app decides how to show it — this only says that it should.
             Astronaut.shared.support.notificationTapped()
         }
@@ -489,5 +496,15 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
     private static func isSupportReply(_ userInfo: [AnyHashable: Any]) -> Bool {
         guard let astronaut = userInfo["astronaut"] as? [String: Any] else { return false }
         return astronaut["type"] as? String == "support"
+    }
+
+    /// The key to a conversation the owner started, when this notification is
+    /// opening one.
+    private static func sessionKey(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let astronaut = userInfo["astronaut"] as? [String: Any],
+              let key = astronaut["session"] as? String,
+              !key.isEmpty
+        else { return nil }
+        return key
     }
 }

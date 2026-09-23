@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import Astronaut
 
@@ -12,12 +13,14 @@ final class SupportChatTests: XCTestCase {
         StubURLProtocol.reset()
         Astronaut.shared.configure(AstronautConfiguration(trackingId: "naut_test"))
         removeQueueFile()
+        removeStoredSecret()
     }
 
     override func tearDown() async throws {
         URLProtocol.unregisterClass(StubURLProtocol.self)
         StubURLProtocol.reset()
         removeQueueFile()
+        removeStoredSecret()
         try await super.tearDown()
     }
 
@@ -211,6 +214,42 @@ final class SupportChatTests: XCTestCase {
         XCTAssertFalse(chat.isOnScreen, "a closed screen must let banners through again")
     }
 
+    /// A conversation the owner starts arrives as a key in a push. Adopting it
+    /// has to replace the key this install was holding, or the message that
+    /// prompted it stays unreadable.
+    func testAdoptingASessionKeyReplacesTheStoredOne() async throws {
+        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
+        let chat = SupportChat()
+        chat.refresh()
+        try await waitUntil { StubURLProtocol.lastAuthorization != nil }
+        let original = try XCTUnwrap(StubURLProtocol.lastAuthorization)
+
+        chat.adoptSession("server-minted-key-0123456789abcdefghijklmnop")
+
+        try await waitUntil { StubURLProtocol.lastAuthorization != original }
+        XCTAssertEqual(
+            StubURLProtocol.lastAuthorization,
+            "Bearer server-minted-key-0123456789abcdefghijklmnop"
+        )
+    }
+
+    /// Whatever was on screen belonged to the old conversation, which this
+    /// install no longer has a key for.
+    func testAdoptingASessionKeyClearsTheOldConversation() async throws {
+        StubURLProtocol.respond(
+            status: 200,
+            body: #"{"messages":[{"id":"s1","sender":"user","body":"mine","client_id":null,"sent_at":"2026-09-23T10:00:00.000000+00:00","read_at":null}],"unread":0}"#
+        )
+        let chat = SupportChat()
+        chat.refresh()
+        try await waitUntil { chat.messages.count == 1 }
+
+        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
+        chat.adoptSession("another-server-minted-key-0123456789abcdef")
+
+        try await waitUntil { chat.messages.isEmpty }
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(
@@ -233,6 +272,19 @@ final class SupportChatTests: XCTestCase {
     private func queueFileExists() -> Bool {
         guard let url = queueURL else { return false }
         return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// The session key outlives a test the way it outlives a launch — which is
+    /// the point of it, and why one test adopting a key would otherwise decide
+    /// what every later test sees.
+    private func removeStoredSecret() {
+        UserDefaults.standard.removeObject(forKey: "astronaut_support_secret_naut_test")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "sh.astronaut.support",
+            kSecAttrAccount as String: "naut_test",
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 
     private func removeQueueFile() {

@@ -255,6 +255,20 @@ public final class SupportChat: ObservableObject {
         isOnScreen = false
     }
 
+    /// A conversation the owner started: the notification carried the key to
+    /// it, which is the only copy this device will ever be offered.
+    ///
+    /// Adopting it replaces the key this install was holding — one that owns
+    /// no conversation, since nothing has been written from here.
+    func adoptSession(_ key: String) {
+        guard let trackingId = Astronaut.shared.currentTrackingId else { return }
+        SupportSecretStore.adopt(key, for: trackingId)
+        // Nothing local can belong to the new conversation.
+        messages.removeAll()
+        lastLoadedAt = nil
+        refresh()
+    }
+
     /// A reply arrived while the app was in the foreground. Pulls it in at
     /// once rather than waiting up to a poll interval, so a message the user
     /// was just told about is already there when they look.

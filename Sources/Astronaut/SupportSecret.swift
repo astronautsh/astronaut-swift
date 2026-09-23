@@ -39,6 +39,26 @@ enum SupportSecretStore {
         return nil
     }
 
+    /// Takes on a session key the server minted, for a conversation it started.
+    ///
+    /// Replaces whatever this install was holding: a device that has never
+    /// written has a key owning no conversation, and keeping it would leave
+    /// the message the owner sent unreadable. Arrives only in an APNs payload,
+    /// so only this phone ever sees it.
+    static func adopt(_ key: String, for trackingId: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: trackingId,
+        ]
+        SecItemDelete(query as CFDictionary)
+
+        let status = store(key, account: trackingId)
+        if status == errSecMissingEntitlement {
+            UserDefaults.standard.set(key, forKey: fallbackKey(trackingId))
+        }
+    }
+
     // MARK: - Keychain
 
     private static func read(account: String) -> String? {
