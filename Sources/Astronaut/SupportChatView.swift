@@ -23,23 +23,30 @@ public struct SupportChatView: View {
     private let placeholder: String
     private let responder: SupportResponder?
     private let showsResponderHeader: Bool
+    private let source: String?
 
-    /// - Parameter showsResponderHeader: Draws the name and role above the
-    ///   conversation. Turn it off when the host puts a
-    ///   ``SupportResponderLabel`` in its navigation bar instead, so the
-    ///   identity appears once rather than twice.
+    /// - Parameters:
+    ///   - showsResponderHeader: Draws the name and role above the
+    ///     conversation. Turn it off when the host puts a
+    ///     ``SupportResponderLabel`` in its navigation bar instead, so the
+    ///     identity appears once rather than twice.
+    ///   - source: Where this was opened from, e.g. "paywall". Recorded on the
+    ///     `support_opened` event, so the journey shows which screen sent
+    ///     someone looking for help.
     public init(
         chat: SupportChat,
         tint: Color = .accentColor,
         placeholder: String = "Ask us anything…",
         responder: SupportResponder? = nil,
-        showsResponderHeader: Bool = true
+        showsResponderHeader: Bool = true,
+        source: String? = nil
     ) {
         self.chat = chat
         self.tint = tint
         self.placeholder = placeholder
         self.responder = responder
         self.showsResponderHeader = showsResponderHeader
+        self.source = source
     }
 
     public var body: some View {
@@ -53,6 +60,13 @@ public struct SupportChatView: View {
             chat.screenAppeared()
             chat.refresh()
             chat.markRead()
+            // Recorded where the conversation opens rather than on the button,
+            // so a tap on a reply notification counts too — and so an app with
+            // its own entry points does not have to remember to send it.
+            Astronaut.shared.send(
+                eventType: "support_opened",
+                metadata: source.map { ["source": $0] } ?? [:]
+            )
         }
         .onDisappear { chat.screenDisappeared() }
         // Polling, not a socket: support is not a chat room, and a few seconds
