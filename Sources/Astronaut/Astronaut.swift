@@ -137,6 +137,10 @@ public final class Astronaut {
 
     public func configure(_ configuration: AstronautConfiguration) {
         self.configuration = configuration
+        // Installed here, not only when permission is requested: a tap on a
+        // reply launches the app cold, and the delegate has to be in place
+        // before iOS delivers that tap.
+        UNUserNotificationCenter.current().delegate = foregroundPresenter
     }
 
     public func trackAppOpen() {
@@ -423,8 +427,9 @@ public final class Astronaut {
     }
 }
 
-/// Presents remote notifications as banners even when the app is in the
-/// foreground — iOS delivers them silently to the app otherwise.
+/// Handles notifications on the SDK's behalf: shows them while the app is in
+/// the foreground — iOS delivers them silently otherwise — and routes a tap on
+/// a support reply back to the conversation it belongs to.
 private final class ForegroundNotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -432,5 +437,26 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .list, .sound, .badge])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        defer { completionHandler() }
+        guard Self.isSupportReply(response.notification.request.content.userInfo) else { return }
+
+        Task { @MainActor in
+            // The app decides how to show it — this only says that it should.
+            Astronaut.shared.support.notificationTapped()
+        }
+    }
+
+    /// A reply sent by the dashboard carries this marker beside `aps`. Anything
+    /// else — a campaign push, another SDK's notification — is left alone.
+    private static func isSupportReply(_ userInfo: [AnyHashable: Any]) -> Bool {
+        guard let astronaut = userInfo["astronaut"] as? [String: Any] else { return false }
+        return astronaut["type"] as? String == "support"
     }
 }

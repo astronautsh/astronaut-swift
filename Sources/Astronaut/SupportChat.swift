@@ -52,6 +52,10 @@ public final class SupportChat: ObservableObject {
     @Published public private(set) var unreadCount: Int = 0
     /// True while the first load is in flight, so the view can say so.
     @Published public private(set) var isLoading: Bool = false
+    /// Set when the user taps a reply notification. The app watches this and
+    /// presents the chat — the SDK does not own the navigation, so it asks
+    /// rather than pushes a screen into someone else's hierarchy.
+    @Published public private(set) var shouldPresent: Bool = false
 
     private var queue: [QueuedMessage] = []
     private var isFlushing = false
@@ -182,6 +186,19 @@ public final class SupportChat: ObservableObject {
             let unread = payload["unread"] as? Int ?? 0
             await MainActor.run { self?.merge(incoming, unread: unread) }
         }
+    }
+
+    /// A reply notification was tapped. Asks the app to show the chat, and
+    /// fetches the reply so it is already there when the screen opens.
+    public func notificationTapped() {
+        shouldPresent = true
+        refresh()
+    }
+
+    /// Call once the chat has been presented, so it is not shown again on the
+    /// next state change.
+    public func presentationHandled() {
+        shouldPresent = false
     }
 
     /// The user has seen the conversation. Clears their badge on the server so
