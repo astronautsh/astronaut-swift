@@ -450,7 +450,14 @@ public final class SupportChat: ObservableObject {
         unreadCount = 0
         post(
             path: "/api/support/read",
-            payload: ["tracking_id": context.trackingId],
+            // The device id rides along so the server can re-point this
+            // conversation if the install has been handed a new one since it
+            // started: replies are pushed to a device, and a stale one is a
+            // reply nobody ever sees.
+            payload: [
+                "tracking_id": context.trackingId,
+                "device_id": context.deviceId,
+            ],
             secret: context.secret
         )
     }
