@@ -138,7 +138,7 @@ public final class SupportChat: ObservableObject {
             ).first
         else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("astronaut-support-queue.json")
+        return dir.appendingPathComponent("astronaut-chat-queue.json")
     }()
 
     init() {

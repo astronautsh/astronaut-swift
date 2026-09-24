@@ -407,7 +407,7 @@ final class SupportChatTests: XCTestCase {
     private var queueURL: URL? {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("astronaut-support-queue.json")
+            .appendingPathComponent("astronaut-chat-queue.json")
     }
 
     private func queueFileExists() -> Bool {
@@ -419,7 +419,7 @@ final class SupportChatTests: XCTestCase {
     /// the point of it, and why one test adopting a key would otherwise decide
     /// what every later test sees.
     private func removeStoredSecret() {
-        UserDefaults.standard.removeObject(forKey: "astronaut_support_secret_naut_test")
+        UserDefaults.standard.removeObject(forKey: "astronaut_chat_key_naut_test")
     }
 
     private func removeQueueFile() {

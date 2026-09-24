@@ -1,9 +1,9 @@
 import Foundation
 import Security
 
-/// The key that owns this install's support conversation.
+/// The key that owns this install's chat.
 ///
-/// Support threads used to be addressed by device id, which is not a secret:
+/// Chat threads used to be addressed by device id, which is not a secret:
 /// it travels in every analytics event, is shown in the owner's dashboard, and
 /// ends up in logs. Anyone who came by one could read the conversation and
 /// write in it. So the thread is owned by 32 random bytes generated here; the
@@ -53,6 +53,6 @@ enum SupportSecretStore {
     }
 
     private static func storageKey(_ trackingId: String) -> String {
-        "astronaut_support_secret_\(trackingId)"
+        "astronaut_chat_key_\(trackingId)"
     }
 }
