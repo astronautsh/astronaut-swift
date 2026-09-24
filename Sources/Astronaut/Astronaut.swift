@@ -458,19 +458,23 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
             return
         }
 
+        // Answered first and synchronously. Nobody needs a banner for a
+        // message they are looking at, but everyone else does — and a decision
+        // that arrives late is treated by iOS as no notification at all, which
+        // is how an open app came to be silent.
+        let isReadingTheConversation = SupportChat.screenVisibility.isOnScreen
+        completionHandler(
+            isReadingTheConversation ? [] : [.banner, .list, .sound, .badge]
+        )
+
+        // Then the work that can wait: the message goes into the conversation
+        // so it is already there when the banner is tapped.
         Task { @MainActor in
-            let chat = Astronaut.shared.support
-            // On screen by the time the notification would have mentioned it.
-            chat.notificationArrived(
+            Astronaut.shared.support.notificationArrived(
                 sessionKey: Self.sessionKey(userInfo),
                 messageId: Self.messageId(userInfo),
                 body: notification.request.content.body
             )
-
-            // Nobody needs to be told about a message they are looking at.
-            // Still delivered, so the unread count and the thread stay right —
-            // only the banner and the sound are dropped.
-            completionHandler(chat.isOnScreen ? [] : [.banner, .list, .sound, .badge])
         }
     }
 

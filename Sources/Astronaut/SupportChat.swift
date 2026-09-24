@@ -126,7 +126,32 @@ public final class SupportChat: ObservableObject {
 
     /// True while the conversation is on screen. A reply that lands now needs
     /// no banner: the person is already reading the thread it would announce.
-    public private(set) var isOnScreen = false
+    public private(set) var isOnScreen = false {
+        didSet { Self.screenVisibility.set(isOnScreen) }
+    }
+
+    /// The same fact, readable without hopping to the main actor.
+    ///
+    /// iOS shows a foreground notification only if the presentation decision
+    /// comes back promptly, so that decision cannot wait on a main thread that
+    /// might be mid-render: waiting is indistinguishable from choosing to
+    /// show nothing.
+    static let screenVisibility = ScreenVisibility()
+
+    final class ScreenVisibility: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+
+        func set(_ newValue: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            value = newValue
+        }
+
+        var isOnScreen: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return value
+        }
+    }
     private var lastLoadedAt: Date?
     private let session = URLSession.shared
 
