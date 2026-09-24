@@ -85,6 +85,33 @@ public final class Astronaut {
     /// ```
     public var deviceId: UUID { deviceUUID }
 
+    /// Which kind of build this is, as every event reports it.
+    ///
+    /// Two buckets, not three: "release" is real usage, "sandbox" is
+    /// everything else — local builds, TestFlight, App Review. They are all
+    /// non-production traffic that must stay out of your figures, and
+    /// splitting them further bought nothing. It also matches what store
+    /// purchases can report: Apple tells us SANDBOX or PRODUCTION and has no
+    /// idea how a build was compiled, so a three-way split could never apply
+    /// to revenue.
+    ///
+    /// Read by chat as well as by events: a conversation is something that
+    /// happened in a build, and an inbox that cannot tell a tester from a
+    /// customer is one you stop trusting.
+    var releaseEnvironment: String {
+        if let custom = configuration?.releaseEnvironment, !custom.isEmpty {
+            return custom
+        }
+
+        #if DEBUG
+        return "sandbox"
+        #else
+        return Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+            ? "sandbox"
+            : "release"
+        #endif
+    }
+
     /// The configured app, for other parts of the SDK. Internal: callers
     /// already know their own tracking id, and nothing outside needs it.
     var currentTrackingId: String? { configuration?.trackingId }
@@ -393,27 +420,6 @@ public final class Astronaut {
             payload["device_model"] = Self.deviceModel
         }
 
-        let releaseEnvironment: String
-        if let custom = configuration.releaseEnvironment, !custom.isEmpty {
-            releaseEnvironment = custom
-        } else {
-            // Two buckets, not three: "release" is real usage, "sandbox" is
-            // everything else — local builds, TestFlight, App Review. They are
-            // all non-production traffic that must stay out of your figures, and
-            // splitting them further bought nothing. It also matches what store
-            // purchases can report: Apple tells us SANDBOX or PRODUCTION and has
-            // no idea how a build was compiled, so a three-way split could never
-            // apply to revenue.
-            #if DEBUG
-            releaseEnvironment = "sandbox"
-            #else
-            if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
-                releaseEnvironment = "sandbox"
-            } else {
-                releaseEnvironment = "release"
-            }
-            #endif
-        }
         payload["release_environment"] = releaseEnvironment
 
         if let revenue {

@@ -441,6 +441,9 @@ public final class SupportChat: ObservableObject {
         let body: [String: Any] = [
             "tracking_id": context.trackingId,
             "device_id": context.deviceId,
+            // Which build this conversation is happening in, so a tester and a
+            // customer are not the same row in someone's inbox.
+            "release_environment": Astronaut.shared.releaseEnvironment,
             "body": next.body,
             "client_id": next.clientId,
         ]
