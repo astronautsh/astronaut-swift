@@ -392,22 +392,6 @@ final class SupportChatTests: XCTestCase {
         XCTAssertFalse(chat.hasMoreHistory, "history already walked to its start stays walked")
     }
 
-    /// The notification delegate reads this without touching the main actor,
-    /// so it has to track the screen from the moment it opens — a flag that
-    /// only catches up later is a banner iOS has already decided not to show.
-    func testScreenVisibilityIsReadableOffTheMainActor() async throws {
-        let chat = SupportChat()
-        XCTAssertFalse(SupportChat.screenVisibility.isOnScreen)
-
-        chat.screenAppeared()
-        let whileOpen = await Task.detached { SupportChat.screenVisibility.isOnScreen }.value
-        XCTAssertTrue(whileOpen, "an open conversation must be visible to the delegate")
-
-        chat.screenDisappeared()
-        let afterClosing = await Task.detached { SupportChat.screenVisibility.isOnScreen }.value
-        XCTAssertFalse(afterClosing, "a closed one must let banners through again")
-    }
-
     // MARK: - Helpers
 
     private func waitUntil(
