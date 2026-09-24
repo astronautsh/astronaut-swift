@@ -43,21 +43,21 @@ func application(_ application: UIApplication,
 }
 ```
 
-### Support chat (optional)
+### Chat (optional)
 
 A conversation between the user and you, keyed to the same install the events
 come from. Present it anywhere:
 
 ```swift
 .sheet(isPresented: $showingHelp) {
-    Astronaut.shared.supportView(
+    Astronaut.shared.chatView(
         tint: .orange,
         placeholder: "What's up?",
         // Optional. Shown above the conversation, so people know who replies.
         // `.cartoon` draws a face instead of initials; isOnline adds a green
         // dot — your claim, not something the SDK can observe, so set it when
         // it is true rather than leaving it on.
-        responder: SupportResponder(
+        responder: ChatResponder(
             name: "Sahil",
             role: "Founder",
             avatar: .cartoon,
@@ -68,8 +68,8 @@ come from. Present it anywhere:
 ```
 
 A reply that arrives while the conversation is open is not announced — it
-simply appears. If you build your own chat UI instead of `supportView`, call
-`Astronaut.shared.support.screenAppeared()` / `.screenDisappeared()` to get the
+simply appears. If you build your own chat UI instead of `chatView`, call
+`Astronaut.shared.chat.screenAppeared()` / `.screenDisappeared()` to get the
 same behaviour.
 
 The conversation is owned by a key the SDK generates and stores on the device,
@@ -79,15 +79,15 @@ which is what lets you start a conversation with someone who has never written
 to you. Nothing to configure.
 
 To put the identity in the navigation bar instead of above the conversation,
-pass `showsResponderHeader: false` and place `SupportResponderLabel` in your
+pass `showsResponderHeader: false` and place `ChatResponderLabel` in your
 own toolbar — it lines up with the close button that way.
 
 Opening the conversation sends a `chat_opened` event, with the `source` you
 pass as metadata — so the journey shows which screen sent someone looking for
 help, the paywall included.
 
-`Astronaut.shared.support.unreadCount` drives a badge, and
-`Astronaut.shared.refreshSupport()` at launch keeps it current. Replies arrive
+`Astronaut.shared.chat.unreadCount` drives a badge, and
+`Astronaut.shared.refreshChat()` at launch keeps it current. Replies arrive
 as push notifications under your own app's name; tapping one opens the chat.
 
 ## Requirements

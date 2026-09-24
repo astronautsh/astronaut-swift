@@ -10,7 +10,7 @@ import XCTest
 @MainActor
 final class AvatarRenderTests: XCTestCase {
     func testCartoonAvatarDrawsSomething() throws {
-        let responder = SupportResponder(
+        let responder = ChatResponder(
             name: "Sahil",
             role: "Founder",
             avatar: .cartoon,
@@ -18,7 +18,7 @@ final class AvatarRenderTests: XCTestCase {
         )
 
         let image = try render(
-            SupportAvatarView(responder: responder, tint: .orange, size: 120)
+            ChatAvatarView(responder: responder, tint: .orange, size: 120)
         )
 
         XCTAssertEqual(image.size.width, 120, accuracy: 1)
@@ -31,8 +31,8 @@ final class AvatarRenderTests: XCTestCase {
     /// Initials must survive the same way, and at navigation-bar size.
     func testInitialsAvatarDrawsSomething() throws {
         let image = try render(
-            SupportAvatarView(
-                responder: SupportResponder(name: "Sahil"),
+            ChatAvatarView(
+                responder: ChatResponder(name: "Sahil"),
                 tint: .orange,
                 size: 30
             )

@@ -1,11 +1,11 @@
 import XCTest
 @testable import Astronaut
 
-/// Tests for the part of support chat that cannot be checked by eye: what
+/// Tests for the part of chat that cannot be checked by eye: what
 /// happens to a message when the network is against it. The queue is the
 /// reason chat can promise delivery at all, so its behaviour is pinned here.
 @MainActor
-final class SupportChatTests: XCTestCase {
+final class ChatTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         URLProtocol.registerClass(StubURLProtocol.self)
@@ -13,7 +13,7 @@ final class SupportChatTests: XCTestCase {
         Astronaut.shared.configure(AstronautConfiguration(trackingId: "naut_test"))
         removeQueueFile()
         removeStoredSecret()
-        SupportChat.hasRegisteredThisLaunch = false
+        Chat.hasRegisteredThisLaunch = false
     }
 
     override func tearDown() async throws {
@@ -29,7 +29,7 @@ final class SupportChatTests: XCTestCase {
     /// being closed a second later.
     func testSendShowsImmediatelyAndPersists() async throws {
         StubURLProtocol.respond(status: 200, body: #"{"message":{"id":"m1"}}"#)
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("my watch won't connect")
 
@@ -46,7 +46,7 @@ final class SupportChatTests: XCTestCase {
     /// so, rather than sit in the queue forever pretending to send.
     func testPermanentRejectionSurfacesAsFailed() async throws {
         StubURLProtocol.respond(status: 400, body: #"{"error":"body is required"}"#)
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("x")
 
@@ -58,7 +58,7 @@ final class SupportChatTests: XCTestCase {
     /// so the next launch can try again.
     func testNetworkFailureKeepsMessageQueued() async throws {
         StubURLProtocol.failWithNetworkError()
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("are you there?")
 
@@ -71,7 +71,7 @@ final class SupportChatTests: XCTestCase {
     /// rather than a rejection: the message stays and tries again later.
     func testRateLimitKeepsMessageQueued() async throws {
         StubURLProtocol.respond(status: 429, body: #"{"error":"Too many messages."}"#)
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("hello?")
 
@@ -84,12 +84,12 @@ final class SupportChatTests: XCTestCase {
     /// sending, so nothing silently disappears between runs.
     func testQueueSurvivesRelaunch() async throws {
         StubURLProtocol.failWithNetworkError()
-        let first = SupportChat()
+        let first = Chat()
         first.send("written before the crash")
         try await waitUntil { StubURLProtocol.requestCount >= 1 }
 
         StubURLProtocol.respond(status: 200, body: #"{"message":{"id":"m1"}}"#)
-        let second = SupportChat()
+        let second = Chat()
 
         XCTAssertEqual(second.messages.first?.body, "written before the crash")
         try await waitUntil { second.messages.first?.state == .sent }
@@ -107,7 +107,7 @@ final class SupportChatTests: XCTestCase {
             ],"unread":1}
             """#
         )
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.refresh()
 
@@ -128,7 +128,7 @@ final class SupportChatTests: XCTestCase {
         // A response the SDK cannot learn the stored id from, so the local copy
         // keeps its client id — the case the merge has to survive.
         StubURLProtocol.respond(status: 200, body: "{}")
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("Hi")
         try await waitUntil { chat.messages.first?.state == .sent }
@@ -149,7 +149,7 @@ final class SupportChatTests: XCTestCase {
     /// messages, so matching on the text would be wrong.
     func testRepeatedTextStaysTwoMessages() async throws {
         StubURLProtocol.respond(status: 200, body: "{}")
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("Hi")
         try await waitUntil { chat.messages.count == 1 }
@@ -163,7 +163,7 @@ final class SupportChatTests: XCTestCase {
     /// is back to trusting a device id, which is not a secret.
     func testRequestsCarryTheInstallSecret() async throws {
         StubURLProtocol.respond(status: 200, body: "{}")
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.send("is anyone there?")
 
@@ -183,7 +183,7 @@ final class SupportChatTests: XCTestCase {
     /// it would end up in logs.
     func testSecretIsStableAndDeviceIdIsNotInTheQuery() async throws {
         StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
-        let first = SupportChat()
+        let first = Chat()
         first.refresh()
         try await waitUntil { StubURLProtocol.lastAuthorization != nil }
         let firstSecret = try XCTUnwrap(StubURLProtocol.lastAuthorization)
@@ -194,7 +194,7 @@ final class SupportChatTests: XCTestCase {
             "a refresh is authenticated by the secret, not by naming the device"
         )
 
-        let second = SupportChat()
+        let second = Chat()
         second.refresh()
         try await waitUntil { StubURLProtocol.requestCount >= 2 }
         XCTAssertEqual(StubURLProtocol.lastAuthorization, firstSecret)
@@ -204,7 +204,7 @@ final class SupportChatTests: XCTestCase {
     /// the presenter asks this, so it has to survive the screen coming and
     /// going rather than latching on first appearance.
     func testScreenVisibilityDrivesNotificationSuppression() async throws {
-        let chat = SupportChat()
+        let chat = Chat()
         XCTAssertFalse(chat.isOnScreen, "a chat nobody opened announces replies")
 
         chat.screenAppeared()
@@ -219,7 +219,7 @@ final class SupportChatTests: XCTestCase {
     /// showing it twice.
     func testNotificationShowsItsMessageBeforeTheFetchLands() async throws {
         StubURLProtocol.failWithNetworkError()
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.notificationArrived(
             messageId: "server-99",
@@ -258,8 +258,8 @@ final class SupportChatTests: XCTestCase {
             status: 200,
             body: #"{"messages":[],"unread":0,"responder":{"name":"Sahil","role":"Founder"}}"#
         )
-        let chat = SupportChat()
-        let fallback = SupportResponder(name: "Support", avatar: .cartoon, isOnline: true)
+        let chat = Chat()
+        let fallback = ChatResponder(name: "Support", avatar: .cartoon, isOnline: true)
 
         XCTAssertEqual(
             chat.resolvedResponder(fallback: fallback)?.name,
@@ -281,13 +281,13 @@ final class SupportChatTests: XCTestCase {
     /// shipped with.
     func testEmptyServerResponderKeepsTheFallback() async throws {
         StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0,"responder":null}"#)
-        let chat = SupportChat()
+        let chat = Chat()
         chat.refresh()
 
         try await waitUntil { StubURLProtocol.requestCount >= 1 }
         XCTAssertNil(chat.responderName)
         XCTAssertEqual(
-            chat.resolvedResponder(fallback: SupportResponder(name: "Support"))?.name,
+            chat.resolvedResponder(fallback: ChatResponder(name: "Support"))?.name,
             "Support"
         )
     }
@@ -304,7 +304,7 @@ final class SupportChatTests: XCTestCase {
             ],"unread":0,"has_more":true}
             """#
         )
-        let chat = SupportChat()
+        let chat = Chat()
         chat.refresh()
         try await waitUntil { chat.messages.count == 1 }
         XCTAssertTrue(chat.hasMoreHistory, "a full page means something sits above it")
@@ -332,7 +332,7 @@ final class SupportChatTests: XCTestCase {
             status: 200,
             body: #"{"messages":[{"id":"m2","sender":"user","body":"second","client_id":null,"sent_at":"2026-09-20T11:00:00.000000+00:00","read_at":null}],"unread":0,"has_more":true}"#
         )
-        let chat = SupportChat()
+        let chat = Chat()
         chat.refresh()
         try await waitUntil { chat.hasMoreHistory }
 
@@ -360,11 +360,11 @@ final class SupportChatTests: XCTestCase {
     /// the server learns a hash rather than being asked to invent one.
     func testRefreshIntroducesTheInstall() async throws {
         StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.refresh()
 
-        try await waitUntil { StubURLProtocol.registeredPaths.contains("/api/support/register") }
+        try await waitUntil { StubURLProtocol.registeredPaths.contains("/api/chat/register") }
         let header = try XCTUnwrap(StubURLProtocol.lastAuthorization)
         XCTAssertTrue(header.hasPrefix("Bearer "), "registration carries the key, not the device id alone")
     }
@@ -374,19 +374,19 @@ final class SupportChatTests: XCTestCase {
     /// would be told it had never run a chat-capable build.
     func testRegistrationIsRetriedAfterAFailedAttempt() async throws {
         StubURLProtocol.failWithNetworkError()
-        let chat = SupportChat()
+        let chat = Chat()
 
         chat.refresh()
         try await waitUntil { StubURLProtocol.requestCount >= 1 }
-        try await waitUntil { !SupportChat.hasRegisteredThisLaunch }
+        try await waitUntil { !Chat.hasRegisteredThisLaunch }
 
         StubURLProtocol.respond(status: 200, body: #"{"ok":true,"registered":true}"#)
         try await waitUntil {
             chat.refresh()
-            return SupportChat.hasRegisteredThisLaunch
+            return Chat.hasRegisteredThisLaunch
         }
         XCTAssertTrue(
-            StubURLProtocol.registeredPaths.contains("/api/support/register"),
+            StubURLProtocol.registeredPaths.contains("/api/chat/register"),
             "the install says hello again once there is a network to say it on"
         )
     }

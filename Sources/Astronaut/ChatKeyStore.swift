@@ -16,7 +16,7 @@ import Security
 /// device id had been thrown away, which is exactly the drift this pair is
 /// meant not to have. Deleting the app forgets the conversation, which is the
 /// answer most people would expect anyway.
-enum SupportSecretStore {
+enum ChatKeyStore {
     /// This app's key, generated and stored the first time it is asked for.
     static func secret(for trackingId: String) -> String? {
         let key = storageKey(trackingId)

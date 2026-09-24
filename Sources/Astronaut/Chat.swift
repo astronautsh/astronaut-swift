@@ -8,7 +8,7 @@ import UIKit
 /// A name and a role, because "Message us" tells someone nothing about whether
 /// a human is on the other end. For a small app the honest answer is usually a
 /// person — and being told so is most of why anyone writes in at all.
-public struct SupportResponder: Sendable, Equatable {
+public struct ChatResponder: Sendable, Equatable {
     /// What to show beside the name.
     public enum Avatar: Sendable, Equatable {
         /// The responder's initials on a tinted circle.
@@ -53,8 +53,8 @@ public struct SupportResponder: Sendable, Equatable {
     }
 }
 
-/// One message in a support conversation.
-public struct SupportMessage: Identifiable, Equatable, Sendable {
+/// One message in a chat.
+public struct ChatMessage: Identifiable, Equatable, Sendable {
     public enum Sender: String, Sendable {
         /// The person using the app.
         case user
@@ -87,17 +87,17 @@ private struct QueuedMessage: Codable {
     let createdAt: Date
 }
 
-/// The support conversation for this install.
+/// The chat for this install.
 ///
 /// Analytics events are fire-and-forget: one lost to a flaky network is a
-/// rounding error nobody notices. A support message is not — someone asking
+/// rounding error nobody notices. A chat message is not — someone asking
 /// about a refund and hearing nothing is worse than never offering chat. So
 /// every outgoing message is written to disk first and retried until the
 /// server takes it.
 @MainActor
-public final class SupportChat: ObservableObject {
+public final class Chat: ObservableObject {
     /// The conversation, oldest first, including messages still on their way.
-    @Published public private(set) var messages: [SupportMessage] = []
+    @Published public private(set) var messages: [ChatMessage] = []
     /// Replies the user has not seen. Badge your own Help button with this.
     @Published public private(set) var unreadCount: Int = 0
     /// True while the first load is in flight, so the view can say so.
@@ -146,7 +146,7 @@ public final class SupportChat: ObservableObject {
         // Anything left from a previous run is shown as still sending, so a
         // message never silently disappears between launches.
         messages = queue.map {
-            SupportMessage(
+            ChatMessage(
                 id: $0.clientId,
                 sender: .user,
                 body: $0.body,
@@ -192,7 +192,7 @@ public final class SupportChat: ObservableObject {
         queue.append(queued)
         saveQueue()
         messages.append(
-            SupportMessage(
+            ChatMessage(
                 id: queued.clientId,
                 sender: .user,
                 body: queued.body,
@@ -204,7 +204,7 @@ public final class SupportChat: ObservableObject {
     }
 
     /// Re-attempt a message the user was told had failed.
-    public func retry(_ message: SupportMessage) {
+    public func retry(_ message: ChatMessage) {
         guard message.state == .failed else { return }
         markState(of: message.id, to: .sending)
         flush()
@@ -225,7 +225,7 @@ public final class SupportChat: ObservableObject {
         else { return }
 
         guard
-            let url = URL(string: "/api/support/register", relativeTo: AstronautConfiguration.baseURL),
+            let url = URL(string: "/api/chat/register", relativeTo: AstronautConfiguration.baseURL),
             let body = try? JSONSerialization.data(withJSONObject: [
                 "tracking_id": context.trackingId,
                 "device_id": context.deviceId,
@@ -251,7 +251,7 @@ public final class SupportChat: ObservableObject {
 
             await MainActor.run {
                 self?.isRegistering = false
-                if heard { SupportChat.hasRegisteredThisLaunch = true }
+                if heard { Chat.hasRegisteredThisLaunch = true }
             }
         }
     }
@@ -273,7 +273,7 @@ public final class SupportChat: ObservableObject {
         if messages.isEmpty { isLoading = true }
 
         var components = URLComponents(
-            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/support/messages"),
+            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/chat/messages"),
             resolvingAgainstBaseURL: false
         )
         // No device_id: the key says which conversation this is, and an
@@ -330,7 +330,7 @@ public final class SupportChat: ObservableObject {
 
     /// The conversation appeared or went away. Drives whether an incoming
     /// reply is announced, so it is the view's business to keep it honest —
-    /// `SupportChatView` does this for you.
+    /// `ChatView` does this for you.
     public func screenAppeared() {
         isOnScreen = true
     }
@@ -353,7 +353,7 @@ public final class SupportChat: ObservableObject {
         isLoadingHistory = true
 
         var components = URLComponents(
-            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/support/messages"),
+            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/chat/messages"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -390,7 +390,7 @@ public final class SupportChat: ObservableObject {
     }
 
     /// Older messages, in front of what is already held.
-    private func prepend(_ older: [SupportMessage]) {
+    private func prepend(_ older: [ChatMessage]) {
         guard !older.isEmpty else { return }
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         for message in older where byId[message.id] == nil {
@@ -405,9 +405,9 @@ public final class SupportChat: ObservableObject {
     /// app that passes nothing gets the dashboard's identity with a plain
     /// avatar, and one that passes a responder keeps its avatar and online
     /// dot while the name follows the dashboard.
-    public func resolvedResponder(fallback: SupportResponder?) -> SupportResponder? {
+    public func resolvedResponder(fallback: ChatResponder?) -> ChatResponder? {
         guard let name = responderName ?? fallback?.name else { return nil }
-        return SupportResponder(
+        return ChatResponder(
             name: name,
             role: responderRole ?? fallback?.role,
             avatar: fallback?.avatar ?? .initials,
@@ -415,7 +415,7 @@ public final class SupportChat: ObservableObject {
         )
     }
 
-    /// A support notification arrived — tapped, or shown while the app was
+    /// A chat notification arrived — tapped, or shown while the app was
     /// open.
     ///
     /// The notification already carries the message, so it goes on screen
@@ -426,7 +426,7 @@ public final class SupportChat: ObservableObject {
         if let messageId, let body,
            !messages.contains(where: { $0.id == messageId }) {
             messages.append(
-                SupportMessage(
+                ChatMessage(
                     id: messageId,
                     sender: .owner,
                     body: body,
@@ -461,7 +461,7 @@ public final class SupportChat: ObservableObject {
         guard unreadCount > 0, let context = Self.context() else { return }
         unreadCount = 0
         post(
-            path: "/api/support/read",
+            path: "/api/chat/read",
             payload: ["tracking_id": context.trackingId],
             secret: context.secret
         )
@@ -485,7 +485,7 @@ public final class SupportChat: ObservableObject {
             "client_id": next.clientId,
         ]
         guard
-            let url = URL(string: "/api/support/messages", relativeTo: AstronautConfiguration.baseURL),
+            let url = URL(string: "/api/chat/messages", relativeTo: AstronautConfiguration.baseURL),
             let data = try? JSONSerialization.data(withJSONObject: body)
         else {
             isFlushing = false
@@ -500,7 +500,7 @@ public final class SupportChat: ObservableObject {
 
         Task { [weak self] in
             let status: Int
-            var storedMessage: SupportMessage?
+            var storedMessage: ChatMessage?
             if let (data, response) = try? await self?.session.data(for: request) {
                 status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -561,7 +561,7 @@ public final class SupportChat: ObservableObject {
 
     // MARK: - State
 
-    private func merge(_ incoming: [(message: SupportMessage, clientId: String?)], unread: Int) {
+    private func merge(_ incoming: [(message: ChatMessage, clientId: String?)], unread: Int) {
         guard !incoming.isEmpty || unreadCount != unread else { return }
         var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
 
@@ -581,7 +581,7 @@ public final class SupportChat: ObservableObject {
     }
 
     /// Replaces a locally-keyed message with the one the server stored.
-    private func adopt(_ stored: SupportMessage, replacing clientId: String) {
+    private func adopt(_ stored: ChatMessage, replacing clientId: String) {
         if let index = messages.firstIndex(where: { $0.id == clientId }) {
             messages[index] = stored
         } else if !messages.contains(where: { $0.id == stored.id }) {
@@ -589,7 +589,7 @@ public final class SupportChat: ObservableObject {
         }
     }
 
-    private func markState(of id: String, to state: SupportMessage.State) {
+    private func markState(of id: String, to state: ChatMessage.State) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].state = state
     }
@@ -619,7 +619,7 @@ public final class SupportChat: ObservableObject {
     private static func context() -> (trackingId: String, deviceId: String, secret: String)? {
         guard
             let trackingId = Astronaut.shared.currentTrackingId,
-            let secret = SupportSecretStore.secret(for: trackingId)
+            let secret = ChatKeyStore.secret(for: trackingId)
         else { return nil }
         return (trackingId, Astronaut.shared.deviceId.uuidString, secret)
     }
@@ -632,11 +632,11 @@ public final class SupportChat: ObservableObject {
 
     private static func parse(
         _ row: [String: Any]
-    ) -> (message: SupportMessage, clientId: String?)? {
+    ) -> (message: ChatMessage, clientId: String?)? {
         guard
             let id = row["id"] as? String,
             let senderRaw = row["sender"] as? String,
-            let sender = SupportMessage.Sender(rawValue: senderRaw),
+            let sender = ChatMessage.Sender(rawValue: senderRaw),
             let body = row["body"] as? String,
             let sentAtRaw = row["sent_at"] as? String
         else { return nil }
@@ -650,7 +650,7 @@ public final class SupportChat: ObservableObject {
             ?? Date()
 
         return (
-            SupportMessage(id: id, sender: sender, body: body, sentAt: sentAt, state: .sent),
+            ChatMessage(id: id, sender: sender, body: body, sentAt: sentAt, state: .sent),
             row["client_id"] as? String
         )
     }

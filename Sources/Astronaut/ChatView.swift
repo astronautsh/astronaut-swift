@@ -1,21 +1,21 @@
 #if canImport(SwiftUI)
 import SwiftUI
 
-/// The support conversation, ready to present.
+/// The chat, ready to present.
 ///
 /// Deliberately plain: it inherits the host app's font and background, and
 /// takes a single tint so it can be made to belong without a styling API. An
-/// app that wants something else can drive `Astronaut.shared.support` directly
+/// app that wants something else can drive `Astronaut.shared.chat` directly
 /// and build its own.
 ///
 /// ```swift
 /// .sheet(isPresented: $showingHelp) {
-///     Astronaut.shared.supportView()
+///     Astronaut.shared.chatView()
 /// }
 /// ```
 @available(iOS 16.0, *)
-public struct SupportChatView: View {
-    @ObservedObject private var chat: SupportChat
+public struct ChatView: View {
+    @ObservedObject private var chat: Chat
     @State private var draft: String = ""
     @FocusState private var inputFocused: Bool
     /// Whether the last message is on screen. Only then does an arriving one
@@ -29,23 +29,23 @@ public struct SupportChatView: View {
 
     private let tint: Color
     private let placeholder: String
-    private let responder: SupportResponder?
+    private let responder: ChatResponder?
     private let showsResponderHeader: Bool
     private let source: String?
 
     /// - Parameters:
     ///   - showsResponderHeader: Draws the name and role above the
     ///     conversation. Turn it off when the host puts a
-    ///     ``SupportResponderLabel`` in its navigation bar instead, so the
+    ///     ``ChatResponderLabel`` in its navigation bar instead, so the
     ///     identity appears once rather than twice.
     ///   - source: Where this was opened from, e.g. "paywall". Recorded on the
     ///     `chat_opened` event, so the journey shows which screen sent
     ///     someone looking for help.
     public init(
-        chat: SupportChat,
+        chat: Chat,
         tint: Color = .accentColor,
         placeholder: String = "Ask us anything…",
-        responder: SupportResponder? = nil,
+        responder: ChatResponder? = nil,
         showsResponderHeader: Bool = true,
         source: String? = nil
     ) {
@@ -72,16 +72,13 @@ public struct SupportChatView: View {
             // so a tap on a reply notification counts too — and so an app with
             // its own entry points does not have to remember to send it.
             //
-            // "chat", not "support": it is what the screen is called everywhere
-            // else, and a journey reading "support opened" beside it invites
-            // the question of whether they are the same thing.
             Astronaut.shared.send(
                 eventType: "chat_opened",
                 metadata: source.map { ["source": $0] } ?? [:]
             )
         }
         .onDisappear { chat.screenDisappeared() }
-        // Polling, not a socket: support is not a chat room, and a few seconds
+        // Polling, not a socket: this is not a chat room, and a few seconds
         // of latency costs nothing next to a connection held open per screen.
         .task {
             while !Task.isCancelled {
@@ -96,7 +93,7 @@ public struct SupportChatView: View {
     }
 
     /// What the app passed, with the dashboard's name and role preferred.
-    private var effectiveResponder: SupportResponder? {
+    private var effectiveResponder: ChatResponder? {
         chat.resolvedResponder(fallback: responder)
     }
 
@@ -104,7 +101,7 @@ public struct SupportChatView: View {
     private var responderHeader: some View {
         if let responder = effectiveResponder, showsResponderHeader {
             HStack(spacing: 10) {
-                SupportResponderLabel(responder: responder, tint: tint, size: 36)
+                ChatResponderLabel(responder: responder, tint: tint, size: 36)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -201,7 +198,7 @@ public struct SupportChatView: View {
     }
 
     @ViewBuilder
-    private func bubble(for message: SupportMessage) -> some View {
+    private func bubble(for message: ChatMessage) -> some View {
         let isUser = message.sender == .user
         HStack {
             if isUser { Spacer(minLength: 40) }

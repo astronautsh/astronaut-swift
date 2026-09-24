@@ -116,39 +116,39 @@ public final class Astronaut {
     /// already know their own tracking id, and nothing outside needs it.
     var currentTrackingId: String? { configuration?.trackingId }
 
-    /// This install's support conversation — messages, unread count, and the
+    /// This install's chat — messages, unread count, and the
     /// retry queue that makes a question survive a dropped network.
     ///
     /// Badge your own Help button with `unreadCount`, and present
-    /// `supportView()` when it is tapped.
+    /// `chatView()` when it is tapped.
     @MainActor
-    public private(set) lazy var support = SupportChat()
+    public private(set) lazy var chat = Chat()
 
-    /// Replies the user has not read yet. Call `refreshSupport()` on launch to
+    /// Replies the user has not read yet. Call `refreshChat()` on launch to
     /// bring it up to date before anyone opens the chat.
     @MainActor
-    public var unreadSupportCount: Int { support.unreadCount }
+    public var unreadChatCount: Int { chat.unreadCount }
 
     /// Check for new replies. Safe to call on launch and when the app comes
     /// forward; the chat screen keeps itself up to date on its own.
     @MainActor
-    public func refreshSupport() {
-        support.refresh()
+    public func refreshChat() {
+        chat.refresh()
     }
 
     #if canImport(SwiftUI)
-    /// The drop-in support screen, tinted to match the app.
+    /// The drop-in chat screen, tinted to match the app.
     @available(iOS 16.0, *)
     @MainActor
-    public func supportView(
+    public func chatView(
         tint: SwiftUI.Color = .accentColor,
         placeholder: String = "Ask us anything…",
-        responder: SupportResponder? = nil,
+        responder: ChatResponder? = nil,
         showsResponderHeader: Bool = true,
         source: String? = nil
     ) -> some SwiftUI.View {
-        SupportChatView(
-            chat: support,
+        ChatView(
+            chat: chat,
             tint: tint,
             placeholder: placeholder,
             responder: responder,
@@ -451,7 +451,7 @@ public final class Astronaut {
 
 /// Handles notifications on the SDK's behalf: shows them while the app is in
 /// the foreground — iOS delivers them silently otherwise — and routes a tap on
-/// a support reply back to the conversation it belongs to.
+/// a chat reply back to the conversation it belongs to.
 private final class ForegroundNotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -459,13 +459,13 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let userInfo = notification.request.content.userInfo
-        guard Self.isSupportReply(userInfo) else {
+        guard Self.isChatReply(userInfo) else {
             completionHandler([.banner, .list, .sound, .badge])
             return
         }
 
         Task { @MainActor in
-            let chat = Astronaut.shared.support
+            let chat = Astronaut.shared.chat
             // On screen by the time the notification would have mentioned it.
             chat.notificationArrived(
                 messageId: Self.messageId(userInfo),
@@ -486,26 +486,26 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
     ) {
         defer { completionHandler() }
         let userInfo = response.notification.request.content.userInfo
-        guard Self.isSupportReply(userInfo) else { return }
+        guard Self.isChatReply(userInfo) else { return }
 
         Task { @MainActor in
             // The message is in the notification, so the conversation opens
             // with it rather than empty while a fetch runs — which on a cold
             // launch is the difference between a blank screen and a chat.
-            Astronaut.shared.support.notificationArrived(
+            Astronaut.shared.chat.notificationArrived(
                 messageId: Self.messageId(userInfo),
                 body: response.notification.request.content.body
             )
             // The app decides how to show it — this only says that it should.
-            Astronaut.shared.support.notificationTapped()
+            Astronaut.shared.chat.notificationTapped()
         }
     }
 
     /// A reply sent by the dashboard carries this marker beside `aps`. Anything
     /// else — a campaign push, another SDK's notification — is left alone.
-    private static func isSupportReply(_ userInfo: [AnyHashable: Any]) -> Bool {
+    private static func isChatReply(_ userInfo: [AnyHashable: Any]) -> Bool {
         guard let astronaut = userInfo["astronaut"] as? [String: Any] else { return false }
-        return astronaut["type"] as? String == "support"
+        return astronaut["type"] as? String == "chat"
     }
 
     /// The id the message was stored under, so the copy taken from the

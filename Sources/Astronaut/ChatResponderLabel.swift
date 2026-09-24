@@ -10,13 +10,13 @@ import SwiftUI
 /// .toolbar {
 ///     if #available(iOS 26.0, *) {
 ///         ToolbarItem(placement: .topBarLeading) {
-///             SupportResponderLabel(responder: responder, tint: .orange)
+///             ChatResponderLabel(responder: responder, tint: .orange)
 ///                 .fixedSize()
 ///         }
 ///         .sharedBackgroundVisibility(.hidden)
 ///     } else {
 ///         ToolbarItem(placement: .topBarLeading) {
-///             SupportResponderLabel(responder: responder, tint: .orange)
+///             ChatResponderLabel(responder: responder, tint: .orange)
 ///         }
 ///     }
 /// }
@@ -28,13 +28,13 @@ import SwiftUI
 /// and role disappear, with no warning and nothing in the console. Opting that
 /// item out of the shared background is what makes the label render.
 @available(iOS 16.0, *)
-public struct SupportResponderLabel: View {
-    private let responder: SupportResponder
+public struct ChatResponderLabel: View {
+    private let responder: ChatResponder
     private let tint: Color
     private let size: CGFloat
 
     public init(
-        responder: SupportResponder,
+        responder: ChatResponder,
         tint: Color = .accentColor,
         size: CGFloat = 30
     ) {
@@ -45,7 +45,7 @@ public struct SupportResponderLabel: View {
 
     public var body: some View {
         HStack(spacing: 8) {
-            SupportAvatarView(responder: responder, tint: tint, size: size)
+            ChatAvatarView(responder: responder, tint: tint, size: size)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(responder.name)
@@ -64,12 +64,12 @@ public struct SupportResponderLabel: View {
 
 /// The avatar on its own: initials or a drawn face, with the online dot.
 @available(iOS 16.0, *)
-public struct SupportAvatarView: View {
-    private let responder: SupportResponder
+public struct ChatAvatarView: View {
+    private let responder: ChatResponder
     private let tint: Color
     private let size: CGFloat
 
-    public init(responder: SupportResponder, tint: Color, size: CGFloat = 30) {
+    public init(responder: ChatResponder, tint: Color, size: CGFloat = 30) {
         self.responder = responder
         self.tint = tint
         self.size = size
