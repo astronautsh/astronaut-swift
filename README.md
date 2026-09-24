@@ -72,9 +72,11 @@ simply appears. If you build your own chat UI instead of `supportView`, call
 `Astronaut.shared.support.screenAppeared()` / `.screenDisappeared()` to get the
 same behaviour.
 
-The conversation is owned by a secret the SDK generates and keeps in the
-Keychain, sent as a bearer token on every request — a device id is never
-accepted as proof of ownership. Nothing to configure.
+The conversation is owned by a key the SDK generates and stores on the device,
+sent as a bearer token on every request — a device id is never accepted as
+proof of ownership. The app tells the server the hash of that key on first run,
+which is what lets you start a conversation with someone who has never written
+to you. Nothing to configure.
 
 To put the identity in the navigation bar instead of above the conversation,
 pass `showsResponderHeader: false` and place `SupportResponderLabel` in your

@@ -468,7 +468,6 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
             let chat = Astronaut.shared.support
             // On screen by the time the notification would have mentioned it.
             chat.notificationArrived(
-                sessionKey: Self.sessionKey(userInfo),
                 messageId: Self.messageId(userInfo),
                 body: notification.request.content.body
             )
@@ -494,7 +493,6 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
             // with it rather than empty while a fetch runs — which on a cold
             // launch is the difference between a blank screen and a chat.
             Astronaut.shared.support.notificationArrived(
-                sessionKey: Self.sessionKey(userInfo),
                 messageId: Self.messageId(userInfo),
                 body: response.notification.request.content.body
             )
@@ -518,15 +516,5 @@ private final class ForegroundNotificationPresenter: NSObject, UNUserNotificatio
               !id.isEmpty
         else { return nil }
         return id
-    }
-
-    /// The key to a conversation the owner started, when this notification is
-    /// opening one.
-    private static func sessionKey(_ userInfo: [AnyHashable: Any]) -> String? {
-        guard let astronaut = userInfo["astronaut"] as? [String: Any],
-              let key = astronaut["session"] as? String,
-              !key.isEmpty
-        else { return nil }
-        return key
     }
 }

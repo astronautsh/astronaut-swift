@@ -210,6 +210,30 @@ public final class SupportChat: ObservableObject {
         flush()
     }
 
+    /// Tells the server this install exists and which key it holds, so a
+    /// conversation can be started with someone who has never written.
+    ///
+    /// Sent once per launch; the server keeps the first answer, so saying it
+    /// again is free and saying it late is harmless. The key travels as the
+    /// bearer token it already is on every other request.
+    private func registerInstall() {
+        guard !Self.hasRegisteredThisLaunch, let context = Self.context() else { return }
+        Self.hasRegisteredThisLaunch = true
+
+        post(
+            path: "/api/support/register",
+            payload: [
+                "tracking_id": context.trackingId,
+                "device_id": context.deviceId,
+            ],
+            secret: context.secret
+        )
+    }
+
+    /// Internal rather than private so a test can start from a launch that
+    /// has not said hello yet; one process runs every test here.
+    static var hasRegisteredThisLaunch = false
+
     /// Pull the thread from the server. Cheap to call often — it asks only for
     /// what is newer than what it already has.
     public func refresh() {
@@ -217,14 +241,17 @@ public final class SupportChat: ObservableObject {
         // cold start is the same moment. One request is enough.
         guard !isRefreshing, let context = Self.context() else { return }
         isRefreshing = true
+        registerInstall()
         if messages.isEmpty { isLoading = true }
 
         var components = URLComponents(
             url: AstronautConfiguration.baseURL.appendingPathComponent("/api/support/messages"),
             resolvingAgainstBaseURL: false
         )
-        // No device_id: the secret says which conversation this is, and an
-        // identifier in a query string is one that ends up in a log.
+        // No device_id: the key says which conversation this is, and an
+        // identifier in a query string is one that ends up in a log. A
+        // conversation the owner started is found by this key too, because it
+        // was created against the hash this install registered.
         var items = [URLQueryItem(name: "tracking_id", value: context.trackingId)]
         if let since = lastLoadedAt {
             items.append(URLQueryItem(name: "since", value: Self.iso8601.string(from: since)))
@@ -282,22 +309,6 @@ public final class SupportChat: ObservableObject {
 
     public func screenDisappeared() {
         isOnScreen = false
-    }
-
-    /// A conversation the owner started: the notification carried the key to
-    /// it, which is the only copy this device will ever be offered.
-    ///
-    /// Adopting it replaces the key this install was holding — one that owns
-    /// no conversation, since nothing has been written from here.
-    func adoptSession(_ key: String) {
-        guard let trackingId = Astronaut.shared.currentTrackingId else { return }
-        SupportSecretStore.adopt(key, for: trackingId)
-        // Nothing local can belong to the new conversation.
-        messages.removeAll()
-        lastLoadedAt = nil
-        hasMoreHistory = false
-        reachedStartOfHistory = false
-        refresh()
     }
 
     /// Pulls the page before the oldest message on screen.
@@ -383,9 +394,7 @@ public final class SupportChat: ObservableObject {
     /// immediately under the id the server stored it as. Waiting for the fetch
     /// instead left an empty conversation for as long as the network took,
     /// which on a cold launch is seconds of looking at nothing.
-    func notificationArrived(sessionKey: String?, messageId: String?, body: String?) {
-        if let sessionKey { adoptSession(sessionKey) }
-
+    func notificationArrived(messageId: String?, body: String?) {
         if let messageId, let body,
            !messages.contains(where: { $0.id == messageId }) {
             messages.append(

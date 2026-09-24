@@ -13,6 +13,7 @@ final class SupportChatTests: XCTestCase {
         Astronaut.shared.configure(AstronautConfiguration(trackingId: "naut_test"))
         removeQueueFile()
         removeStoredSecret()
+        SupportChat.hasRegisteredThisLaunch = false
     }
 
     override func tearDown() async throws {
@@ -213,42 +214,6 @@ final class SupportChatTests: XCTestCase {
         XCTAssertFalse(chat.isOnScreen, "a closed screen must let banners through again")
     }
 
-    /// A conversation the owner starts arrives as a key in a push. Adopting it
-    /// has to replace the key this install was holding, or the message that
-    /// prompted it stays unreadable.
-    func testAdoptingASessionKeyReplacesTheStoredOne() async throws {
-        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
-        let chat = SupportChat()
-        chat.refresh()
-        try await waitUntil { StubURLProtocol.lastAuthorization != nil }
-        let original = try XCTUnwrap(StubURLProtocol.lastAuthorization)
-
-        chat.adoptSession("server-minted-key-0123456789abcdefghijklmnop")
-
-        try await waitUntil { StubURLProtocol.lastAuthorization != original }
-        XCTAssertEqual(
-            StubURLProtocol.lastAuthorization,
-            "Bearer server-minted-key-0123456789abcdefghijklmnop"
-        )
-    }
-
-    /// Whatever was on screen belonged to the old conversation, which this
-    /// install no longer has a key for.
-    func testAdoptingASessionKeyClearsTheOldConversation() async throws {
-        StubURLProtocol.respond(
-            status: 200,
-            body: #"{"messages":[{"id":"s1","sender":"user","body":"mine","client_id":null,"sent_at":"2026-09-23T10:00:00.000000+00:00","read_at":null}],"unread":0}"#
-        )
-        let chat = SupportChat()
-        chat.refresh()
-        try await waitUntil { chat.messages.count == 1 }
-
-        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
-        chat.adoptSession("another-server-minted-key-0123456789abcdef")
-
-        try await waitUntil { chat.messages.isEmpty }
-    }
-
     /// The message is in the notification, so it should be on screen before
     /// any fetch returns — and the fetch must then recognise it rather than
     /// showing it twice.
@@ -257,7 +222,6 @@ final class SupportChatTests: XCTestCase {
         let chat = SupportChat()
 
         chat.notificationArrived(
-            sessionKey: nil,
             messageId: "server-99",
             body: "we pushed a fix, try again"
         )
@@ -391,6 +355,20 @@ final class SupportChatTests: XCTestCase {
         XCTAssertFalse(chat.hasMoreHistory, "history already walked to its start stays walked")
     }
 
+    /// The install says hello so the owner can start a conversation with
+    /// someone who has never written — and says it with the key it holds, so
+    /// the server learns a hash rather than being asked to invent one.
+    func testRefreshIntroducesTheInstall() async throws {
+        StubURLProtocol.respond(status: 200, body: #"{"messages":[],"unread":0}"#)
+        let chat = SupportChat()
+
+        chat.refresh()
+
+        try await waitUntil { StubURLProtocol.registeredPaths.contains("/api/support/register") }
+        let header = try XCTUnwrap(StubURLProtocol.lastAuthorization)
+        XCTAssertTrue(header.hasPrefix("Bearer "), "registration carries the key, not the device id alone")
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(
@@ -438,6 +416,14 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var clientId: String?
     nonisolated(unsafe) private static var authorization: String?
     nonisolated(unsafe) private static var url: URL?
+    nonisolated(unsafe) private static var paths: Set<String> = []
+
+    /// Every path asked for so far, so a test can check that something was
+    /// announced as well as what came back.
+    static var registeredPaths: Set<String> {
+        lock.lock(); defer { lock.unlock() }
+        return paths
+    }
 
     /// The Authorization header of the last request, so the tests can check
     /// that the install actually authenticates itself.
@@ -484,6 +470,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         clientId = nil
         authorization = nil
         url = nil
+        paths = []
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -510,6 +497,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         Self.count += 1
         Self.authorization = request.value(forHTTPHeaderField: "Authorization")
         Self.url = request.url
+        if let path = request.url?.path { Self.paths.insert(path) }
         if let bodyData,
            let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
            let sent = json["client_id"] as? String {
