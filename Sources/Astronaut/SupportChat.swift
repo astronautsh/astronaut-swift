@@ -213,22 +213,50 @@ public final class SupportChat: ObservableObject {
     /// Tells the server this install exists and which key it holds, so a
     /// conversation can be started with someone who has never written.
     ///
-    /// Sent once per launch; the server keeps the first answer, so saying it
-    /// again is free and saying it late is harmless. The key travels as the
-    /// bearer token it already is on every other request.
+    /// Marked done only once the server has actually heard it. A first launch
+    /// on a plane would otherwise spend the attempt on a request that never
+    /// left, and the install would stay unreachable until the next cold start.
+    /// Retried from the next refresh instead — launch, foreground, or the poll
+    /// while the chat is open — and the server keeps the first answer, so
+    /// asking again costs nothing.
     private func registerInstall() {
-        guard !Self.hasRegisteredThisLaunch, let context = Self.context() else { return }
-        Self.hasRegisteredThisLaunch = true
+        guard !Self.hasRegisteredThisLaunch, !isRegistering,
+              let context = Self.context()
+        else { return }
 
-        post(
-            path: "/api/support/register",
-            payload: [
+        guard
+            let url = URL(string: "/api/support/register", relativeTo: AstronautConfiguration.baseURL),
+            let body = try? JSONSerialization.data(withJSONObject: [
                 "tracking_id": context.trackingId,
                 "device_id": context.deviceId,
-            ],
-            secret: context.secret
-        )
+            ])
+        else { return }
+
+        isRegistering = true
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(context.secret)", forHTTPHeaderField: "Authorization")
+        request.httpBody = body
+
+        Task { [weak self] in
+            var heard = false
+            if let (_, response) = try? await self?.session.data(for: request) {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                // Accepted, or refused in a way that will never change: an
+                // unknown app is not going to become known by asking again.
+                heard = status == 200 || ((400..<500).contains(status) && status != 429)
+            }
+
+            await MainActor.run {
+                self?.isRegistering = false
+                if heard { SupportChat.hasRegisteredThisLaunch = true }
+            }
+        }
     }
+
+    private var isRegistering = false
 
     /// Internal rather than private so a test can start from a launch that
     /// has not said hello yet; one process runs every test here.

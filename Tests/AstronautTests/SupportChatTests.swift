@@ -369,6 +369,28 @@ final class SupportChatTests: XCTestCase {
         XCTAssertTrue(header.hasPrefix("Bearer "), "registration carries the key, not the device id alone")
     }
 
+    /// A first launch with no connection must not spend the introduction: the
+    /// install would stay unreachable until the next cold start, and the owner
+    /// would be told it had never run a chat-capable build.
+    func testRegistrationIsRetriedAfterAFailedAttempt() async throws {
+        StubURLProtocol.failWithNetworkError()
+        let chat = SupportChat()
+
+        chat.refresh()
+        try await waitUntil { StubURLProtocol.requestCount >= 1 }
+        try await waitUntil { !SupportChat.hasRegisteredThisLaunch }
+
+        StubURLProtocol.respond(status: 200, body: #"{"ok":true,"registered":true}"#)
+        try await waitUntil {
+            chat.refresh()
+            return SupportChat.hasRegisteredThisLaunch
+        }
+        XCTAssertTrue(
+            StubURLProtocol.registeredPaths.contains("/api/support/register"),
+            "the install says hello again once there is a network to say it on"
+        )
+    }
+
     // MARK: - Helpers
 
     private func waitUntil(
