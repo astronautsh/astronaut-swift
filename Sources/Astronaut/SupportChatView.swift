@@ -39,7 +39,7 @@ public struct SupportChatView: View {
     ///     ``SupportResponderLabel`` in its navigation bar instead, so the
     ///     identity appears once rather than twice.
     ///   - source: Where this was opened from, e.g. "paywall". Recorded on the
-    ///     `support_opened` event, so the journey shows which screen sent
+    ///     `chat_opened` event, so the journey shows which screen sent
     ///     someone looking for help.
     public init(
         chat: SupportChat,
@@ -71,8 +71,12 @@ public struct SupportChatView: View {
             // Recorded where the conversation opens rather than on the button,
             // so a tap on a reply notification counts too — and so an app with
             // its own entry points does not have to remember to send it.
+            //
+            // "chat", not "support": it is what the screen is called everywhere
+            // else, and a journey reading "support opened" beside it invites
+            // the question of whether they are the same thing.
             Astronaut.shared.send(
-                eventType: "support_opened",
+                eventType: "chat_opened",
                 metadata: source.map { ["source": $0] } ?? [:]
             )
         }

@@ -80,7 +80,7 @@ To put the identity in the navigation bar instead of above the conversation,
 pass `showsResponderHeader: false` and place `SupportResponderLabel` in your
 own toolbar — it lines up with the close button that way.
 
-Opening the conversation sends a `support_opened` event, with the `source` you
+Opening the conversation sends a `chat_opened` event, with the `source` you
 pass as metadata — so the journey shows which screen sent someone looking for
 help, the paywall included.
 
