@@ -1,4 +1,3 @@
-import Security
 import XCTest
 @testable import Astronaut
 
@@ -421,12 +420,6 @@ final class SupportChatTests: XCTestCase {
     /// what every later test sees.
     private func removeStoredSecret() {
         UserDefaults.standard.removeObject(forKey: "astronaut_support_secret_naut_test")
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "sh.astronaut.support",
-            kSecAttrAccount as String: "naut_test",
-        ]
-        SecItemDelete(query as CFDictionary)
     }
 
     private func removeQueueFile() {
