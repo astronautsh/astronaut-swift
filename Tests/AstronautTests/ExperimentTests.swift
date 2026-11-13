@@ -60,6 +60,23 @@ final class ExperimentTests: XCTestCase {
         XCTAssertEqual(Double(both), Double(installs) / 4, accuracy: Double(installs) / 4 * 0.08)
     }
 
+    func testAPinnedVariantWinsUntilItIsCleared() {
+        let astronaut = Astronaut.shared
+        let variants = ["control", "apple"]
+        let dealt = astronaut.variant("pin_test", variants)
+        let other = variants.first { $0 != dealt }!
+
+        astronaut.setVariantOverride(other, for: "pin_test")
+        XCTAssertEqual(astronaut.variant("pin_test", variants), other)
+
+        // A pin to something the app no longer offers is ignored, not returned.
+        astronaut.setVariantOverride("retired", for: "pin_test")
+        XCTAssertEqual(astronaut.variant("pin_test", variants), dealt)
+
+        astronaut.setVariantOverride(nil, for: "pin_test")
+        XCTAssertEqual(astronaut.variant("pin_test", variants), dealt)
+    }
+
     func testOneVariantOrNoneIsNotASplit() {
         XCTAssertEqual(Astronaut.experimentBucket(experiment: "x", deviceId: UUID(), count: 1), 0)
         XCTAssertEqual(Astronaut.shared.variant("x", []), "")

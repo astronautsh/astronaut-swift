@@ -288,9 +288,44 @@ public final class Astronaut {
         let name = experiment.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !variants.isEmpty else { return variants.first ?? "" }
 
-        let index = Self.experimentBucket(experiment: name, deviceId: deviceUUID, count: variants.count)
+        // A variant pinned for testing wins, as long as it is still one of
+        // the variants: a pin left over from an older build must not hand
+        // back a name the app no longer has a screen for.
+        let pinned = variantOverrides[name].flatMap { variants.firstIndex(of: $0) }
+        let index = pinned
+            ?? Self.experimentBucket(experiment: name, deviceId: deviceUUID, count: variants.count)
         reportExposure(experiment: name, variant: variants[index], position: index)
         return variants[index]
+    }
+
+    /// Pins this install to one variant of an experiment, or with `nil` lets
+    /// it go back to the one it would get by itself.
+    ///
+    /// For looking at a variant you were not dealt: a tester's phone lands on
+    /// one side like anyone's, and the other side still has to be seen before
+    /// it ships. The pin is kept across launches, and the install reports the
+    /// pinned variant like any other, so it shows in the dashboard under it.
+    ///
+    /// Keep it out of builds your customers run. An install that picks its
+    /// own side is no longer part of a random split, and enough of them make
+    /// the result mean nothing.
+    public func setVariantOverride(_ variant: String?, for experiment: String) {
+        let name = experiment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+
+        var overrides = variantOverrides
+        overrides[name] = variant
+        defaults.set(overrides, forKey: variantOverridesKey)
+
+        // So the change is reported this launch, not the next one.
+        reportedExperimentsLock.lock()
+        reportedExperiments.remove(name)
+        reportedExperimentsLock.unlock()
+    }
+
+    private let variantOverridesKey = "ma_experiment_overrides"
+    private var variantOverrides: [String: String] {
+        defaults.dictionary(forKey: variantOverridesKey) as? [String: String] ?? [:]
     }
 
     /// Experiments already reported since launch. Once a launch rather than

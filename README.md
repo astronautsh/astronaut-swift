@@ -48,6 +48,12 @@ from the device id, so nothing is stored or fetched. The first variant is the
 baseline the dashboard compares the others against. Keep the list in the same
 order across releases.
 
+To look at a variant your own phone was not dealt, pin it in a debug build:
+
+```swift
+Astronaut.shared.setVariantOverride("apple", for: "signin_apple")  // nil to unpin
+```
+
 ### Push notifications (optional)
 
 ```swift
