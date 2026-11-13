@@ -165,10 +165,18 @@ public final class Astronaut {
         if let existing = defaults.string(forKey: "ma_device_id"),
            let parsed = UUID(uuidString: existing) {
             deviceUUID = parsed
+            // An install that was here before experiments were is not a new
+            // one, and must not be enrolled as if it were. Only decided the
+            // first time: after that the flag is the record of whether this
+            // install has had its turn.
+            if defaults.object(forKey: "ma_experiments_enrolled_once") == nil {
+                defaults.set(true, forKey: "ma_experiments_enrolled_once")
+            }
         } else {
             let generated = UUID()
             defaults.set(generated.uuidString, forKey: "ma_device_id")
             deviceUUID = generated
+            defaults.set(false, forKey: "ma_experiments_enrolled_once")
         }
     }
 
@@ -184,6 +192,8 @@ public final class Astronaut {
         if Bundle.main.bundleURL.pathExtension == "app" {
             UNUserNotificationCenter.current().delegate = foregroundPresenter
         }
+
+        refreshExperiments()
     }
 
     public func trackAppOpen() {
@@ -257,54 +267,47 @@ public final class Astronaut {
 
     // MARK: - Experiments
 
-    /// Which version of an experiment this install gets, and a note to the
-    /// dashboard that it saw it.
+    /// Which variant of an experiment this install has, or `nil` if it is not
+    /// in the experiment — in which case show what you ship today.
     ///
     /// ```swift
-    /// switch Astronaut.shared.variant("signin_apple", ["control", "apple"]) {
+    /// switch Astronaut.shared.variant("signin_apple") {
     /// case "apple": AppleSignInView()
-    /// default: EmailSignInView()
+    /// default:      EmailSignInView()
     /// }
     /// ```
     ///
-    /// Call it where the difference is shown, not at launch: everyone who
-    /// calls it is counted as having seen the experiment, and counting people
-    /// who never reached the screen only waters the result down.
+    /// Experiments are made in the dashboard: their variants, how much of the
+    /// audience they take, what they are judged by, and when they run. This
+    /// is the app's whole part in one.
     ///
-    /// The answer comes from the device id, so an install gets the same
-    /// version every time with nothing stored and nothing fetched — it works
-    /// offline and on the first launch. The split is even. List the variants
-    /// in the same order in every release: the order is what the choice is
-    /// made from, so reordering them reshuffles who gets what.
+    /// Ask where the difference is shown, not at launch. Asking is what
+    /// counts an install as having seen the experiment, and counting people
+    /// who never reached the screen only waters the result down. If only
+    /// some people should be in it, ask only for them.
     ///
-    /// The first variant is the one the dashboard compares the others against,
-    /// so put what you ship today there.
-    ///
-    /// Ending an experiment is deleting the call and keeping the winner.
-    ///
-    /// - Returns: One of `variants`, or an empty string if there are none.
-    @discardableResult
-    public func variant(_ experiment: String, _ variants: [String]) -> String {
+    /// Only new installs are enrolled: an install is dealt its variants the
+    /// first time it opens the app, and keeps them. They are fetched at
+    /// launch and remembered, so this answers at once and works offline. Until
+    /// that first fetch lands the answer is `nil`.
+    public func variant(_ experiment: String) -> String? {
         let name = experiment.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !variants.isEmpty else { return variants.first ?? "" }
+        guard !name.isEmpty,
+              let variant = variantOverrides[name] ?? heldAssignments[name]
+        else { return nil }
 
-        // A variant pinned for testing wins, as long as it is still one of
-        // the variants: a pin left over from an older build must not hand
-        // back a name the app no longer has a screen for.
-        let pinned = variantOverrides[name].flatMap { variants.firstIndex(of: $0) }
-        let index = pinned
-            ?? Self.experimentBucket(experiment: name, deviceId: deviceUUID, count: variants.count)
-        reportExposure(experiment: name, variant: variants[index], position: index)
-        return variants[index]
+        reportExposure(experiment: name, variant: variant)
+        return variant
     }
 
     /// Pins this install to one variant of an experiment, or with `nil` lets
-    /// it go back to the one it would get by itself.
+    /// it go back to whatever it was dealt.
     ///
     /// For looking at a variant you were not dealt: a tester's phone lands on
-    /// one side like anyone's, and the other side still has to be seen before
-    /// it ships. The pin is kept across launches, and the install reports the
-    /// pinned variant like any other, so it shows in the dashboard under it.
+    /// one side like anyone's — or, not being a new install, on neither — and
+    /// every side still has to be seen before it ships. The pin is kept
+    /// across launches, and the install reports the pinned variant like any
+    /// other, so it shows in the dashboard under it.
     ///
     /// Keep it out of builds your customers run. An install that picks its
     /// own side is no longer part of a random split, and enough of them make
@@ -328,6 +331,63 @@ public final class Astronaut {
         defaults.dictionary(forKey: variantOverridesKey) as? [String: String] ?? [:]
     }
 
+    /// The variants this install was dealt, by experiment name, as of the
+    /// last time the server was asked.
+    private let assignmentsKey = "ma_experiment_assignments"
+    var heldAssignments: [String: String] {
+        defaults.dictionary(forKey: assignmentsKey) as? [String: String] ?? [:]
+    }
+
+    /// Replaces what the install holds with what the server says it should.
+    /// Replaces rather than merges, which is how an experiment that has been
+    /// stopped lets go of everyone: it is simply no longer in the answer.
+    func storeAssignments(_ assignments: [String: String]) {
+        defaults.set(assignments, forKey: assignmentsKey)
+    }
+
+    /// Set once this install has been through its one chance to be enrolled.
+    /// Only a new install is dealt a variant of anything, so nobody who has
+    /// already seen the app as it was is moved to something new.
+    private let enrolledOnceKey = "ma_experiments_enrolled_once"
+
+    /// Asks the server which variants this install should hold. Called at
+    /// configure; nothing waits on it.
+    ///
+    /// A failed request changes nothing, including whether the install still
+    /// counts as new — so a first launch with no connection gets its chance
+    /// on the next one instead of losing it.
+    private func refreshExperiments() {
+        guard let configuration else { return }
+        let fresh = !defaults.bool(forKey: enrolledOnceKey)
+
+        let payload: [String: Any] = [
+            "tracking_id": configuration.trackingId,
+            "device_id": deviceUUID.uuidString,
+            "fresh": fresh,
+            "held": heldAssignments,
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+
+        var request = URLRequest(
+            url: AstronautConfiguration.baseURL.appendingPathComponent("/api/experiments/assignments")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            guard let self,
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let assignments = json["experiments"] as? [String: String]
+            else { return }
+
+            self.storeAssignments(assignments)
+            if fresh { self.defaults.set(true, forKey: self.enrolledOnceKey) }
+        }.resume()
+    }
+
     /// Experiments already reported since launch. Once a launch rather than
     /// once an install: events are sent without waiting for an answer, so a
     /// report lost to a dead connection would otherwise be lost for good and
@@ -336,7 +396,7 @@ public final class Astronaut {
     private var reportedExperiments = Set<String>()
     private let reportedExperimentsLock = NSLock()
 
-    private func reportExposure(experiment: String, variant: String, position: Int) {
+    private func reportExposure(experiment: String, variant: String) {
         // Before configure there is nowhere to send it, and marking it sent
         // would swallow the report for the rest of the launch.
         guard configuration != nil else { return }
@@ -348,33 +408,8 @@ public final class Astronaut {
 
         send(
             eventType: "experiment_exposed",
-            // The position is how the dashboard knows which variant is the
-            // baseline: the names alone would sort "apple" ahead of "control".
-            metadata: ["experiment": experiment, "variant": variant, "position": String(position)]
+            metadata: ["experiment": experiment, "variant": variant]
         )
-    }
-
-    /// The index an install lands on. Hashed by hand because Swift's own
-    /// hashing is seeded afresh every launch, and this has to give the same
-    /// answer for the life of the install. The experiment name is part of
-    /// what is hashed, so being in the first half of one experiment says
-    /// nothing about which half of the next you are in.
-    static func experimentBucket(experiment: String, deviceId: UUID, count: Int) -> Int {
-        guard count > 1 else { return 0 }
-
-        // FNV-1a over the name and the id.
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in "\(experiment):\(deviceId.uuidString)".utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        // FNV's low bits are its weakest, and the low bits are what a split
-        // in two reads. One round of mixing spreads the whole hash into them.
-        hash ^= hash >> 33
-        hash = hash &* 0xff51_afd7_ed55_8ccd
-        hash ^= hash >> 33
-
-        return Int(hash % UInt64(count))
     }
 
     /// Associates a real end-user identity with this device so the dashboard can

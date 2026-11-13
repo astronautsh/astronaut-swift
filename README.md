@@ -32,21 +32,22 @@ Astronaut.shared.send(eventType: "level_completed", appUserId: nil, metadata: ["
 
 ### Experiments (optional)
 
-Show some installs one version of a screen and the rest another, and see in
-the dashboard which converts. Ask which variant an install gets, where the
-difference is shown:
+Show some of your new installs one version of a screen and the rest another,
+and see in the dashboard which converts. Experiments are made in the dashboard
+— their variants, their audience, what they are judged by, when they run. In
+the app, ask which variant this install has, where the versions differ:
 
 ```swift
-switch Astronaut.shared.variant("signin_apple", ["control", "apple"]) {
+switch Astronaut.shared.variant("signin_apple") {
 case "apple": AppleSignInView()
 default:      EmailSignInView()
 }
 ```
 
-The split is even and an install keeps its variant for good: the answer comes
-from the device id, so nothing is stored or fetched. The first variant is the
-baseline the dashboard compares the others against. Keep the list in the same
-order across releases.
+`variant` returns `nil` for an install that is not in the experiment; show
+what you ship today. Only new installs are enrolled, the first time they open
+the app, and they keep their variant. Variants are fetched at launch and
+remembered, so the answer is instant and works offline.
 
 To look at a variant your own phone was not dealt, pin it in a debug build:
 

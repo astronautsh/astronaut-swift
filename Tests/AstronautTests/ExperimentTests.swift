@@ -1,85 +1,61 @@
 import XCTest
 @testable import Astronaut
 
-/// An experiment is only worth reading if the split behind it is fair and
-/// stays put: an install that changes sides between launches is in both
-/// groups, and a split that leans one way is a difference nobody tested.
+/// The app's whole part in an experiment is asking which variant it has, so
+/// what matters here is that the answer is exactly what the server dealt:
+/// nothing for an install that is not enrolled, the pinned variant for a
+/// tester, and nothing again once the experiment is gone.
 final class ExperimentTests: XCTestCase {
-    func testAnInstallKeepsItsVariant() {
-        let device = UUID()
-        let first = Astronaut.experimentBucket(experiment: "signin_apple", deviceId: device, count: 2)
-        for _ in 0..<50 {
-            XCTAssertEqual(
-                Astronaut.experimentBucket(experiment: "signin_apple", deviceId: device, count: 2),
-                first
-            )
-        }
+    private let astronaut = Astronaut.shared
+    private var before: [String: String] = [:]
+
+    override func setUp() {
+        before = astronaut.heldAssignments
+        astronaut.storeAssignments([:])
     }
 
-    /// Pinned to a known answer, so a change to the hash — which would move
-    /// every install in every running experiment — fails here first.
-    func testTheHashHasNotMoved() {
-        let device = UUID(uuidString: "ED0346A2-7C49-43EE-B4FF-ADD21FAA4E4E")!
-        XCTAssertEqual(
-            Astronaut.experimentBucket(experiment: "signin_apple", deviceId: device, count: 2),
-            0
-        )
-        XCTAssertEqual(
-            Astronaut.experimentBucket(experiment: "signin_apple", deviceId: device, count: 3),
-            1
-        )
+    override func tearDown() {
+        astronaut.setVariantOverride(nil, for: "signin_apple")
+        astronaut.storeAssignments(before)
     }
 
-    func testTheSplitIsEven() {
-        for count in [2, 3, 4] {
-            var tally = [Int](repeating: 0, count: count)
-            let installs = 20_000
-            for _ in 0..<installs {
-                tally[Astronaut.experimentBucket(experiment: "paywall_copy", deviceId: UUID(), count: count)] += 1
-            }
-            let expected = Double(installs) / Double(count)
-            for share in tally {
-                // Well outside what chance does at this size, well inside
-                // what a lopsided hash would.
-                XCTAssertEqual(Double(share), expected, accuracy: expected * 0.05)
-            }
-        }
+    func testAnInstallThatIsNotEnrolledGetsNothing() {
+        XCTAssertNil(astronaut.variant("signin_apple"))
     }
 
-    /// Two experiments running at once must not put the same people on the
-    /// same side of both, or each one's result is partly the other's.
-    func testExperimentsSplitIndependently() {
-        var both = 0
-        let installs = 20_000
-        for _ in 0..<installs {
-            let device = UUID()
-            let a = Astronaut.experimentBucket(experiment: "signin_apple", deviceId: device, count: 2)
-            let b = Astronaut.experimentBucket(experiment: "paywall_copy", deviceId: device, count: 2)
-            if a == 1 && b == 1 { both += 1 }
-        }
-        XCTAssertEqual(Double(both), Double(installs) / 4, accuracy: Double(installs) / 4 * 0.08)
+    func testAnEnrolledInstallGetsWhatItWasDealt() {
+        astronaut.storeAssignments(["signin_apple": "apple", "paywall_copy": "control"])
+
+        XCTAssertEqual(astronaut.variant("signin_apple"), "apple")
+        XCTAssertEqual(astronaut.variant("  signin_apple "), "apple")
+        XCTAssertEqual(astronaut.variant("paywall_copy"), "control")
+        XCTAssertNil(astronaut.variant("something_else"))
     }
 
-    func testAPinnedVariantWinsUntilItIsCleared() {
-        let astronaut = Astronaut.shared
-        let variants = ["control", "apple"]
-        let dealt = astronaut.variant("pin_test", variants)
-        let other = variants.first { $0 != dealt }!
+    /// Stopping an experiment drops it from the server's answer, and the
+    /// install has to let go with it rather than keep an old variant alive.
+    func testAStoppedExperimentLetsGo() {
+        astronaut.storeAssignments(["signin_apple": "apple", "paywall_copy": "control"])
+        astronaut.storeAssignments(["paywall_copy": "control"])
 
-        astronaut.setVariantOverride(other, for: "pin_test")
-        XCTAssertEqual(astronaut.variant("pin_test", variants), other)
-
-        // A pin to something the app no longer offers is ignored, not returned.
-        astronaut.setVariantOverride("retired", for: "pin_test")
-        XCTAssertEqual(astronaut.variant("pin_test", variants), dealt)
-
-        astronaut.setVariantOverride(nil, for: "pin_test")
-        XCTAssertEqual(astronaut.variant("pin_test", variants), dealt)
+        XCTAssertNil(astronaut.variant("signin_apple"))
+        XCTAssertEqual(astronaut.variant("paywall_copy"), "control")
     }
 
-    func testOneVariantOrNoneIsNotASplit() {
-        XCTAssertEqual(Astronaut.experimentBucket(experiment: "x", deviceId: UUID(), count: 1), 0)
-        XCTAssertEqual(Astronaut.shared.variant("x", []), "")
-        XCTAssertEqual(Astronaut.shared.variant("x", ["only"]), "only")
+    func testAPinWinsUntilItIsCleared() {
+        astronaut.storeAssignments(["signin_apple": "control"])
+
+        astronaut.setVariantOverride("apple", for: "signin_apple")
+        XCTAssertEqual(astronaut.variant("signin_apple"), "apple")
+
+        astronaut.setVariantOverride(nil, for: "signin_apple")
+        XCTAssertEqual(astronaut.variant("signin_apple"), "control")
+    }
+
+    /// A tester's phone is rarely a new install, so it is usually in nothing.
+    /// The pin has to work for it all the same.
+    func testAPinWorksForAnInstallThatIsNotEnrolled() {
+        astronaut.setVariantOverride("apple", for: "signin_apple")
+        XCTAssertEqual(astronaut.variant("signin_apple"), "apple")
     }
 }
