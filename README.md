@@ -30,6 +30,24 @@ Astronaut.shared.trackPurchase(revenue: 9.99, currency: "USD")
 Astronaut.shared.send(eventType: "level_completed", appUserId: nil, metadata: ["level": "3"])
 ```
 
+### Experiments (optional)
+
+Show some installs one version of a screen and the rest another, and see in
+the dashboard which converts. Ask which variant an install gets, where the
+difference is shown:
+
+```swift
+switch Astronaut.shared.variant("signin_apple", ["control", "apple"]) {
+case "apple": AppleSignInView()
+default:      EmailSignInView()
+}
+```
+
+The split is even and an install keeps its variant for good: the answer comes
+from the device id, so nothing is stored or fetched. The first variant is the
+baseline the dashboard compares the others against. Keep the list in the same
+order across releases.
+
 ### Push notifications (optional)
 
 ```swift

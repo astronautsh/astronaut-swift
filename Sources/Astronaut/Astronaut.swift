@@ -255,6 +255,93 @@ public final class Astronaut {
         send(eventType: "trial_started", metadata: payload)
     }
 
+    // MARK: - Experiments
+
+    /// Which version of an experiment this install gets, and a note to the
+    /// dashboard that it saw it.
+    ///
+    /// ```swift
+    /// switch Astronaut.shared.variant("signin_apple", ["control", "apple"]) {
+    /// case "apple": AppleSignInView()
+    /// default: EmailSignInView()
+    /// }
+    /// ```
+    ///
+    /// Call it where the difference is shown, not at launch: everyone who
+    /// calls it is counted as having seen the experiment, and counting people
+    /// who never reached the screen only waters the result down.
+    ///
+    /// The answer comes from the device id, so an install gets the same
+    /// version every time with nothing stored and nothing fetched — it works
+    /// offline and on the first launch. The split is even. List the variants
+    /// in the same order in every release: the order is what the choice is
+    /// made from, so reordering them reshuffles who gets what.
+    ///
+    /// The first variant is the one the dashboard compares the others against,
+    /// so put what you ship today there.
+    ///
+    /// Ending an experiment is deleting the call and keeping the winner.
+    ///
+    /// - Returns: One of `variants`, or an empty string if there are none.
+    @discardableResult
+    public func variant(_ experiment: String, _ variants: [String]) -> String {
+        let name = experiment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !variants.isEmpty else { return variants.first ?? "" }
+
+        let index = Self.experimentBucket(experiment: name, deviceId: deviceUUID, count: variants.count)
+        reportExposure(experiment: name, variant: variants[index], position: index)
+        return variants[index]
+    }
+
+    /// Experiments already reported since launch. Once a launch rather than
+    /// once an install: events are sent without waiting for an answer, so a
+    /// report lost to a dead connection would otherwise be lost for good and
+    /// the install would never count. A later launch says it again, and the
+    /// dashboard reads each device's first.
+    private var reportedExperiments = Set<String>()
+    private let reportedExperimentsLock = NSLock()
+
+    private func reportExposure(experiment: String, variant: String, position: Int) {
+        // Before configure there is nowhere to send it, and marking it sent
+        // would swallow the report for the rest of the launch.
+        guard configuration != nil else { return }
+
+        reportedExperimentsLock.lock()
+        let isNew = reportedExperiments.insert(experiment).inserted
+        reportedExperimentsLock.unlock()
+        guard isNew else { return }
+
+        send(
+            eventType: "experiment_exposed",
+            // The position is how the dashboard knows which variant is the
+            // baseline: the names alone would sort "apple" ahead of "control".
+            metadata: ["experiment": experiment, "variant": variant, "position": String(position)]
+        )
+    }
+
+    /// The index an install lands on. Hashed by hand because Swift's own
+    /// hashing is seeded afresh every launch, and this has to give the same
+    /// answer for the life of the install. The experiment name is part of
+    /// what is hashed, so being in the first half of one experiment says
+    /// nothing about which half of the next you are in.
+    static func experimentBucket(experiment: String, deviceId: UUID, count: Int) -> Int {
+        guard count > 1 else { return 0 }
+
+        // FNV-1a over the name and the id.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in "\(experiment):\(deviceId.uuidString)".utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        // FNV's low bits are its weakest, and the low bits are what a split
+        // in two reads. One round of mixing spreads the whole hash into them.
+        hash ^= hash >> 33
+        hash = hash &* 0xff51_afd7_ed55_8ccd
+        hash ^= hash >> 33
+
+        return Int(hash % UInt64(count))
+    }
+
     /// Associates a real end-user identity with this device so the dashboard can
     /// show a name/email on the user journey instead of an anonymous handle.
     /// Call it once you know who the user is (e.g. after sign-in). The latest
